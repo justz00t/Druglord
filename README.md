@@ -5,9 +5,16 @@
 A recreation of the DOS game DRUGLORD.EXE v2.01 (Turbo C, by Phil Erwin).
 Ported to Windows by justz00t.
 
+## About the registered version
+
+DrugLord was shareware, and the registered version has been lost. This port adds it back as best it can be reconstructed from images of it found online. That covers the "REGISTERED VERSION" title screen with its registration name and serial number, and the final screen shown when you exit.
+
+The only extra feature known from the registered version is saving your game, so that is what was added: F1 loads and F2 saves (Ctrl-L and Ctrl-S also work), with a prompt for the save name. Anything else the registered version may have had is unknown, so nothing else was guessed at or invented.
+
+## Contents
+
 - `DrugLord.exe` (see Releases): native 64-bit Windows window, scales with the window size.
 - `go/`: Go source (standard library only). See "Building the exe" below.
-  `GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -s -w" -o DrugLord.exe .`
 - `DrugLord.ps1`: the earlier PowerShell edition.
 
 Keys: F1 = Load, F2 = Save (Ctrl-L / Ctrl-S also work).
