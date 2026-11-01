@@ -1,3 +1,5 @@
+![DrugLord v2.10 title screen](docs/title-screen.png)
+
 # DrugLord v2.10
 
 A recreation of the DOS game DRUGLORD.EXE v2.01 (Turbo C, by Phil Erwin).
