@@ -7,7 +7,7 @@ Ported to Windows by justz00t.
 
 ## About the registered version
 
-DrugLord was shareware, and the registered version has been lost. This port adds it back as best it can be reconstructed from images of it found online. That covers the "REGISTERED VERSION" title screen with its registration name and serial number, and the final screen shown when you exit.
+This port is based on the shareware version, because the registered version has been lost to time. The registered version is added back as best it can be reconstructed from images of it found online. That covers the "REGISTERED VERSION" title screen with its registration name and serial number, and the final screen shown when you exit.
 
 The only extra feature known from the registered version is saving your game, so that is what was added: F1 loads and F2 saves (Ctrl-L and Ctrl-S also work), with a prompt for the save name. Anything else the registered version may have had is unknown, so nothing else was guessed at or invented.
 
