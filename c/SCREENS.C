@@ -1,4 +1,23 @@
-/* screen images, linked after DRUGLORD.C */
+/*
+ * SCREENS.C -- the picture data of DRUGLORD.EXE v2.01 (second module).
+ *
+ * Every array is a text-mode screen image in the PC's native format: two
+ * bytes per character cell (the IBM character, then its colour attribute).
+ * Where an array starts with 0x50 0x00 0x19 0x00 0xa0 0x0f it is a saved
+ * 80x25 screen with a 6 byte header.  They are copied to the screen with
+ * puttext().  DRUGLORD.C refers to them as externs.
+ *
+ *   unusedMainScreen  an old copy of the main screen; never used by the game
+ *   fightScreen       the cop-fight screen
+ *   gunSprite         a small gun picture for the end scene
+ *   endScene          the end-of-game background (the rich man's room)
+ *   deathScreen       the "you died" picture
+ *   barSprite         one block of the money stacks in the end scene
+ *   titleArt          the DRUGLORD title letters on the intro screen
+ *   farewellScreen    the screen shown when you quit
+ *
+ * Plain data, so there is nothing to explain line by line.
+ */
 unsigned char unusedMainScreen[4006] = {
     0x50, 0x00, 0x19, 0x00, 0xa0, 0x0f, 0xd5, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07,
     0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07,

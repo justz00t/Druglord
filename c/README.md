@@ -1,53 +1,121 @@
-# Matching the original DRUGLORD.EXE (work in progress)
+# DRUGLORD v2.01 – byte-matched C source
 
-Goal: recreate source that Turbo C compiles to the same bytes as the original
-`DRUGLORD.EXE`. Nothing here is the game yet; this records what has been found.
+This folder contains a C reconstruction of **DRUGLORD.EXE v2.01** (Phil Erwin,
+FantasyWare Inc., 1991-93) that, compiled with **Borland Turbo C 2.01** in the
+**small memory model**, produces an EXE that is **byte-for-byte identical** to the original
+`DRUGLORD.EXE` (74,286 bytes, MD5 `1ea0bd4c15546a1dc44365e80fb4b7cf`).
 
-## Status: all 28 game functions match the original bytes
+It is *not* the author's own source (that was never released); it was rebuilt from the EXE
+until the compiler output matched exactly. It contains only the original v2.01 game: nothing
+from the later Go/PowerShell ports (the gun-count fix, extra screens, changed wording) is
+in it. The code is commented so that people can read it and learn how the game works.
 
-Each file in `src/` is compiled with Turbo C 2.01 (`-ms`) and compared with the same
-function in the original `DRUGLORD.EXE`; bytes that the linker fills in (addresses of
-globals and library calls) are masked out via the OBJ fixups. Only the **original** game is
-reproduced here: nothing from the later Go/PowerShell ports (gun-count fix, extra screens,
-wording) is part of this C source.
+## Files
 
-Matched: setcolor, cprint, flushkeys, cursor, sfx, fillch, box, frame, drawnames,
-readfield, drawmain, travelcost, dice, drawhp, monofix, nextday, pressany, drawdruglist,
-marketevent, drawcities, drawstatus, genprices, playagain (+ restorescreen), newgame,
-intro, endgame, main (the game loop, `src/gamemain.c`) and event (the ten random
-events / cop chase, `src/event.c`).
+| File | What it is |
+|------|------------|
+| `DRUGLORD.C` | The game: all 28 functions, the tables and the game state. Heavily commented. |
+| `SCREENS.C` | Second module with the picture data (title, fight, death, end scene...). |
+| `SCRMAIN.INC` | The main-screen picture (hex bytes), included by `DRUGLORD.C`. |
+| `tools/` | Scripts used to build and verify (see "Verifying" below). `tools/dev/` holds the helper scripts used while reconstructing. |
 
-Not done yet: linking everything into one program with the original data layout and string
-order, so the whole EXE can be compared. Global variable names are guesses; only the code
-bytes are verified.
+## Compiler
 
-## Findings
+* **Borland Turbo C 2.01** (the original EXE contains the text
+  `Turbo-C - Copyright (c) 1988 Borland Intl.`).  Version 2.0 does *not* match; it has to be 2.01.
+* **Small memory model** (`-ms`, which is also the default of `tcc`).
+* No optimisation options, no debug information, default stack size, default floating-point
+  setting (software emulation, `-f`).
 
-- **Compiler:** `DRUGLORD.EXE` contains `Turbo-C - Copyright (c) 1988 Borland Intl.`
-  **Turbo C 2.01** reproduces the library code better than 2.0 (83% versus 62% of a test
-  program's code found byte-for-byte), and every function so far matches with 2.01.
-- **Memory model: small (`-ms`).** Test program share found in the game: small 83%,
-  tiny 72%, medium 66%, compact 51%, large 47%, huge 45%.
-- **Style idioms that matter for a byte match:**
-  - K&R definitions (`f(a, b) int a; int b;`) for functions whose callers push words;
-    ANSI prototypes only where a `float` parameter is really passed as a 4-byte float
-    (`marketevent`).
-  - `register int i, j;` gives SI then DI; other locals get stack slots, the last declared
-    one at the highest address.
-  - `else` after a `break` creates a dead `jmp`, so the original has none.
-  - Source files need DOS (CRLF) line endings and octal escapes (`\221`) next to digits.
-- **Names:** the names of globals and helper routines in `src/` are guesses; only the
-  code bytes are verified.
+## How to compile it with Borland / Turbo C 2.01
 
-## How it was done
+You need real DOS or an emulator such as DOSBox with Turbo C 2.01 installed (for example in
+`C:\TC`).
 
-Turbo C 2.01 runs under DOSBox-X (headless). `tools/run-dosbox.sh` runs a `.bat` file
-there with `C:` mapped to a folder. Source files need DOS (CRLF) line endings.
-Compile line: `tcc -ms -IC:\TC\INCLUDE -LC:\TC\LIB -eNAME FILE.C`.
-Turbo C and DOSBox themselves are not stored in this repo.
+1. Copy `DRUGLORD.C`, `SCREENS.C` and `SCRMAIN.INC` into one folder, e.g. `C:\DL`.
+   Keep the files' **DOS (CRLF) line endings** – if you transferred them through something
+   that converted them to Unix line endings, convert them back, otherwise the result will
+   differ.
+2. Open a DOS prompt and make sure Turbo C is on the path:
+   ```
+   path C:\TC;%PATH%
+   cd \DL
+   ```
+3. Compile and link both files in one command:
+   ```
+   tcc -ms DRUGLORD.C SCREENS.C
+   ```
+   (If `tcc` cannot find the headers or libraries add
+   `-IC:\TC\INCLUDE -LC:\TC\LIB`.)
+4. The result is `DRUGLORD.EXE` in the same folder.  It should be exactly 74,286 bytes and
+   identical to the original:
+   ```
+   fc /b DRUGLORD.EXE ORIGINAL\DRUGLORD.EXE
+   ```
+   (`FC: no differences encountered`).
 
-## Next steps
+Using the Turbo C **IDE** instead: create a project (`Project > Open project...`) containing
+`DRUGLORD.C` and `SCREENS.C`, set `Options > Compiler > Model` to **Small**, and choose
+`Compile > Build all`.  The IDE must have Floating point = Emulation (the default) and
+Optimization/Debug settings at their defaults.
 
-1. Match 0x14ab and 0x3694.
-2. Link everything into one program (needs the exact order of globals and string
-   literals) and compare the whole EXE.
+The module order matters: **`DRUGLORD.C` first, `SCREENS.C` second**, because the linker lays
+out data in that order.
+
+## Why the source looks the way it does
+
+To get identical bytes the source has to mimic what the author's compiler saw, so a few
+things look odd.  Each one is also explained where it appears in the code.
+
+* **One big `struct GameState g`.** In the original these were separate global variables.
+  Turbo C's linker orders uninitialised globals by a hash of their *names*, which cannot be
+  recovered, so the original's memory layout is reproduced by listing the fields in the
+  original address order inside one struct.
+* **K&R function headers** (`int f(a, b) int a; int b; { ... }`).  The compiler generates
+  different code for old-style definitions (arguments are pushed as `int`), so they are used
+  wherever the original did.  ANSI prototypes are used only where an argument really is a
+  `char` or `float` (`setColor`, `fillChars`, `readField`, `marketEvent`).
+* **Strings and tables in the original order.** Turbo C stores string literals in the order
+  they first appear, without merging duplicates, so the order of the text and the odd
+  unused `"";` in `marketEvent` are significant.
+* **Odd constructs** such as `generatePrices()` taking eight `long *` pointers, `padByte`, the
+  unused main-screen copy in `SCREENS.C`, or `bonus` being reused as the hospital bill are
+  there because the original does it that way.
+* **Two modules.** The program was compiled from two source files, so the picture data
+  is in `SCREENS.C`.
+* **Register variables.**  `register int` declarations (SI, then DI) and the order of local
+  declarations decide the stack layout and the register use.
+
+Because of all this: if you change the code, you will most likely no longer get an
+identical EXE.  That is fine for experiments, but compare again if byte-exactness matters.
+
+## Verifying (how the match was checked)
+
+`tools/build.py` copies the three source files into a DOSBox-X folder where Turbo C 2.01 is
+installed, runs `tcc -ms DRUGLORD.C SCREENS.C`, and compares the resulting EXE with the
+original:
+
+```
+python3 tools/build.py          # prints IDENTICAL when all 74,286 bytes match
+```
+
+The paths of DOSBox and of the original EXE are set at the top of the script (or through the
+environment variables `DL_DOSBOX` and `DL_ORIG`); `tools/run-dosbox.sh` starts DOSBox-X
+headless.  Turbo C and DOSBox are not part of this repository.  `tools/cmpexe.py` compares
+two EXEs header by header, which helps when something differs.
+
+The final build was also compared with `cmp` and the MD5 checksum above.
+
+## How it was done (short version)
+
+1. The compiler and memory model were identified by comparing library code (startup code, `printf`
+   family, floating-point emulator, ...) in the EXE with test programs compiled with several Turbo C
+   versions and models.  Turbo C 2.01 / small was by far the best fit.
+2. The functions were located and disassembled; the calls to library routines were resolved
+   from the object-file fixups.
+3. Each function was rewritten in C and compiled, and the machine code compared with the
+   original (addresses the linker fills in were masked out).  Idioms that influence the code
+   were found by trial: `else` after `break`, `while(1)` versus `for(;;)`, jump tables for `switch`, etc.
+4. Finally all functions, the data tables and the literal strings were put together in the
+   original order, the globals were collected into one struct, and the whole EXE was linked
+   and compared until every byte was identical.
