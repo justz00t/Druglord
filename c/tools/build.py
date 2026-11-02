@@ -9,7 +9,7 @@ src = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.abspath(os.
 w = os.path.join(DOS, "cdrive", "M")
 os.makedirs(w, exist_ok=True)
 for f in os.listdir(w): os.remove(os.path.join(w, f))
-for f in ("DRUGLORD.C", "SCREENS.C"):
+for f in ("DRUGLORD.C", "SCREENS.C", "SCRMAIN.INC"):
     shutil.copy(os.path.join(src, f), os.path.join(w, f))
 open(os.path.join(DOS, "cdrive", "MATCH.BAT"), "w").write(
     "path C:\\TC;Z:\\\r\ncd \\M\r\ntcc -ms -IC:\\TC\\INCLUDE -LC:\\TC\\LIB DRUGLORD.C SCREENS.C > OUT.TXT\r\n")
