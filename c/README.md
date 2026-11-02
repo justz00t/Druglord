@@ -3,7 +3,7 @@
 Goal: recreate source that Turbo C compiles to the same bytes as the original
 `DRUGLORD.EXE`. Nothing here is the game yet; this records what has been found.
 
-## Status: 26 of 28 game functions match the original bytes
+## Status: all 28 game functions match the original bytes
 
 Each file in `src/` is compiled with Turbo C 2.01 (`-ms`) and compared with the same
 function in the original `DRUGLORD.EXE`; bytes that the linker fills in (addresses of
@@ -14,10 +14,12 @@ wording) is part of this C source.
 Matched: setcolor, cprint, flushkeys, cursor, sfx, fillch, box, frame, drawnames,
 readfield, drawmain, travelcost, dice, drawhp, monofix, nextday, pressany, drawdruglist,
 marketevent, drawcities, drawstatus, genprices, playagain (+ restorescreen), newgame,
-intro, endgame.
+intro, endgame, main (the game loop, `src/gamemain.c`) and event (the ten random
+events / cop chase, `src/event.c`).
 
-Still open: the two big functions at 0x14ab (random events and actions) and 0x3694
-(`main`: the game loop).
+Not done yet: linking everything into one program with the original data layout and string
+order, so the whole EXE can be compared. Global variable names are guesses; only the code
+bytes are verified.
 
 ## Findings
 
