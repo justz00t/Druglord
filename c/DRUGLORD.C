@@ -6,6 +6,7 @@
 #include <dos.h>
 #include <math.h>
 #include <time.h>
+#include <bios.h>
 
 void setcolor(int fg, int bg, char blink);
 void fillch(char c, int n, char *buf);
@@ -13,11 +14,12 @@ int readfield(int width, char flag, char *buf);
 void marketevent(int count, int rng, float mul);
 
 extern void cprint(), cursor(), sfx(), box(), frame(), drawnames(), drawstatus(), drawmain(), drawcities(), drawdruglist(), drawhp(), pressany(), flushkeys(), genprices(), nextday(), intro(), newgame(), monofix(), endgame(), event(), restorescreen();
-extern int dice(), playagain();
-extern long travelcost();
+extern int dice(), playagain(), travelcost();
 
 struct range { long lo, hi; };
 
+extern char buf4328[], firebuf[], savebuf2[], savebuf[], barbuf[], buf67d0[];
+extern char tbuf[7][124];
 /* ---- initialised data ---- */
 unsigned char scrmain[2560] = {
     0xd5, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07, 0xcd, 0x07,
@@ -266,47 +268,47 @@ struct range prange[8] = {
 };
 int dim[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
 /* ---- uninitialised data ---- */
-int mkttoday;
-int flag7920;
-float bias[8];
-unsigned basis[8];
-int esc;
+int mktEvent2;
+int bustFlag5;
+float drugBias5[8];
+unsigned baseCost6[8];
+int escapeF;
 int dead;
-int holdused;
+int spaceLeft2;
 long cash;
 int day;
-int g_mono;
+int mono;
 int month;
 int year;
 int health;
-long bank;
-int guntype;
-int hold;
+long inBank;
+int gunKind;
+int coatSize;
 int status;
-long debt;
-int curcity;
-int loanflag;
-char inbuf2[80];
-int inv[8];
-int loandays;
-int goodDeals;
-int used[8];
-char flag10[10];
-int flag79f6;
-int delaytime;
-int flag79fa;
-int totalDeals;
-struct text_info ti;
-int totaldays;
-long price[8];
-int ngun;
+long owedVal;
+int whereAmIZ;
+int hasLoan;
+char inputBuf[80];
+int drugsHeldX[8];
+int dueDays;
+int profitDealsH;
+int chosenOld[8];
+char eventDone[10];
+int chaseFlag;
+int delayUnit_;
+int quietFlag;
+int allDeals;
+struct text_info textInfo;
+int daysPlayed;
+long streetPrice[8];
+int numGunsTmp;
 
 void setcolor(fg, bg, blink)
 int fg;
 int bg;
 char blink;
 {
-    if (g_mono == 1) {
+    if (mono == 1) {
         textcolor(15);
         if (bg)
             textbackground(7);
@@ -367,7 +369,7 @@ int on;
 {
     if (on == 0)
         _CX = 0x2807;
-    else if (vmode == 7)
+    else if (textInfo.currmode == 7)
         _CX = 0x90a;
     else
         _CX = 0x607;
@@ -469,11 +471,11 @@ int x1, y1, x2, y2;
     gotoxy(x2, y2); putch(chars[4]);
     gotoxy(x1, y2); putch(chars[6]);
     gotoxy(x1 + 1, y1);
-    fillch(chars[1], x2 - x1 - 1, gbuf);
-    cputs(gbuf);
+    fillch(chars[1], x2 - x1 - 1, inputBuf);
+    cputs(inputBuf);
     gotoxy(x1 + 1, y2);
-    fillch(chars[5], x2 - x1 - 1, gbuf);
-    cputs(gbuf);
+    fillch(chars[5], x2 - x1 - 1, inputBuf);
+    cputs(inputBuf);
     for (y = y1 + 1; y < y2; y++) {
         gotoxy(x1, y); putch(chars[3]);
         gotoxy(x2, y); putch(chars[7]);
@@ -506,8 +508,8 @@ char *buf;
     sx = wherex();
     sy = wherey();
     cursor(1);
-    fillch(' ', width, gbuf);
-    cputs(gbuf);
+    fillch(' ', width, inputBuf);
+    cputs(inputBuf);
     while (1) {
         if (width - 1 > i) {
             gotoxy(sx + i, sy);
@@ -560,10 +562,10 @@ char *buf;
 void frame(x1, y1, x2, y2)
 int x1, y1, x2, y2;
 {
-    gettextinfo(&ti);
+    gettextinfo(&textInfo);
     window(x1, y1, x2, y2);
     clrscr();
-    textmode(ti.currmode);
+    textmode(textInfo.currmode);
 }
 
 void drawnames()
@@ -583,44 +585,44 @@ void drawstatus()
 {
     register int i;
 
-    holdused = 0;
+    spaceLeft2 = 0;
     cursor(0);
     drawnames();
     for (i = 0; i < 8; i++) {
         gotoxy(16, i + 7);
-        if (inv[i] > 0) setcolor(14, 0, 1);
+        if (drugsHeldX[i] > 0) setcolor(14, 0, 1);
         else setcolor(7, 0, 0);
-        cprintf("%6d", inv[i]);
+        cprintf("%6d", drugsHeldX[i]);
         gotoxy(38, i + 7);
         setcolor(12, 0, 1);
-        cprintf("%10ld", price[i]);
-        holdused += inv[i];
+        cprintf("%10ld", streetPrice[i]);
+        spaceLeft2 += drugsHeldX[i];
     }
     setcolor(14, 0, 1);
-    holdused = hold - holdused;
+    spaceLeft2 = coatSize - spaceLeft2;
     gotoxy(63, 4);
-    cprintf("%-15s", cityname[curcity]);
+    cprintf("%-15s", cityname[whereAmIZ]);
     gotoxy(63, 5);
-    cprintf("%-6d (%d max)", holdused, hold);
+    cprintf("%-6d (%d max)", spaceLeft2, coatSize);
     gotoxy(63, 7);
     cprintf("$%-10ld", cash);
     gotoxy(63, 8);
-    cprintf("$%-10ld", bank);
+    cprintf("$%-10ld", inBank);
     gotoxy(63, 9);
-    cprintf("$%-10ld", debt);
+    cprintf("$%-10ld", owedVal);
     gotoxy(74, 9);
-    if (loanflag == 1) {
+    if (hasLoan == 1) {
         cputs("(   )");
-        if (loandays <= 2) setcolor(140, 0, 1);
+        if (dueDays <= 2) setcolor(140, 0, 1);
         gotoxy(75, 9);
-        cprintf("%3d", loandays);
+        cprintf("%3d", dueDays);
         setcolor(14, 0, 1);
     } else
         cputs("     ");
     gotoxy(63, 11);
-    cprintf("%-6d", ngun);
+    cprintf("%-6d", numGunsTmp);
     gotoxy(63, 12);
-    cprintf("%-13s", gunname[guntype]);
+    cprintf("%-13s", gunname[gunKind]);
     gotoxy(63, 14);
     cprintf("%-6d", status);
     gotoxy(63, 15);
@@ -628,7 +630,7 @@ void drawstatus()
     cprintf("%-4d", health);
     setcolor(14, 0, 1);
     gotoxy(12, 3);
-    cprintf("%#02d/%#02d/%#02d", date1, date2, date3);
+    cprintf("%#02d/%#02d/%#02d", month, day, year);
 }
 
 void drawmain()
@@ -665,10 +667,10 @@ void drawmain()
     cprint("v2.01", 74, 2);
 }
 
-long travelcost(a, b)
+int travelcost(a, b)
 int a, b;
 {
-    return (long)(sqrt(pow((double)(cityxy[b][0] - cityxy[a][0]), 2.0) +
+    return (int)(sqrt(pow((double)(cityxy[b][0] - cityxy[a][0]), 2.0) +
                        pow((double)(cityxy[b][1] - cityxy[a][1]), 2.0)) * 60.0 + 25.0);
 }
 
@@ -678,7 +680,7 @@ void drawcities()
     register int i, d;
 
     cursor(0);
-    box(1, 17, 80, 25);
+    frame(1, 17, 80, 25);
     cprint("\x91\005Drug Cities:", 34, 17);
     for (d = 0; d < 4; d++) {
         for (j = 0; j <= 1; j++) {
@@ -689,10 +691,10 @@ void drawcities()
             cprintf("%2d. ", i + 1);
             setcolor(11, 0, 0);
             cprintf("%-20s", cityname[i]);
-            if (i == curcity) continue;
+            if (i == whereAmIZ) continue;
             cputs("(");
             setcolor(2, 0, 0);
-            cprintf("$%d", travelcost(curcity, i));
+            cprintf("$%d", travelcost(whereAmIZ, i));
             cprint("\x91\x0b)", 11, 0);
         }
     }
@@ -700,14 +702,14 @@ void drawcities()
 
 void genprices(long *p0, long *p1, long *p2, long *p3, long *p4, long *p5, long *p6, long *p7)
 {
-    *p0 = (long)(((double)(rand() % (prange[0].hi - prange[0].lo) + prange[0].lo) + bias[0]) * citymul[curcity][0]);
-    *p1 = (long)(((double)(rand() % (prange[1].hi - prange[1].lo) + prange[1].lo) + bias[1]) * citymul[curcity][1]);
-    *p2 = (long)(((double)(rand() % (prange[2].hi - prange[2].lo) + prange[2].lo) + bias[2]) * citymul[curcity][2]);
-    *p3 = (long)(((double)(rand() % (prange[3].hi - prange[3].lo) + prange[3].lo) + bias[3]) * citymul[curcity][3]);
-    *p4 = (long)(((double)(rand() % (prange[4].hi - prange[4].lo) + prange[4].lo) + bias[4]) * citymul[curcity][4]);
-    *p5 = (long)(((double)(rand() % (prange[5].hi - prange[5].lo) + prange[5].lo) + bias[5]) * citymul[curcity][5]);
-    *p6 = (long)(((double)(rand() % (prange[6].hi - prange[6].lo) + prange[6].lo) + bias[6]) * citymul[curcity][6]);
-    *p7 = (long)(((double)(rand() % (prange[7].hi - prange[7].lo) + prange[7].lo) + bias[7]) * citymul[curcity][7]);
+    *p0 = (long)(((double)(rand() % (prange[0].hi - prange[0].lo) + prange[0].lo) + drugBias5[0]) * citymul[whereAmIZ][0]);
+    *p1 = (long)(((double)(rand() % (prange[1].hi - prange[1].lo) + prange[1].lo) + drugBias5[1]) * citymul[whereAmIZ][1]);
+    *p2 = (long)(((double)(rand() % (prange[2].hi - prange[2].lo) + prange[2].lo) + drugBias5[2]) * citymul[whereAmIZ][2]);
+    *p3 = (long)(((double)(rand() % (prange[3].hi - prange[3].lo) + prange[3].lo) + drugBias5[3]) * citymul[whereAmIZ][3]);
+    *p4 = (long)(((double)(rand() % (prange[4].hi - prange[4].lo) + prange[4].lo) + drugBias5[4]) * citymul[whereAmIZ][4]);
+    *p5 = (long)(((double)(rand() % (prange[5].hi - prange[5].lo) + prange[5].lo) + drugBias5[5]) * citymul[whereAmIZ][5]);
+    *p6 = (long)(((double)(rand() % (prange[6].hi - prange[6].lo) + prange[6].lo) + drugBias5[6]) * citymul[whereAmIZ][6]);
+    *p7 = (long)(((double)(rand() % (prange[7].hi - prange[7].lo) + prange[7].lo) + drugBias5[7]) * citymul[whereAmIZ][7]);
 }
 
 int dice(sides, count)
@@ -726,10 +728,10 @@ void drawdruglist()
     register int i;
 
     cursor(0);
-    cprint("Which drug?", 45, 18);
-    fillch(0xc4, 40, gbuf);
+    cprint("\221\r* * *  \221\031D R U G S  \221\r* * *", 45, 18);
+    fillch(0xc4, 40, inputBuf);
     setcolor(14, 0, 0);
-    cprint(gbuf, 36, 19);
+    cprint(inputBuf, 36, 19);
     for (i = 0; i < 4; i++) {
         gotoxy(43, i + 21);
         setcolor(12, 0, 1);
@@ -772,23 +774,24 @@ void marketevent(int count, int rng, float mul)
 
     n = rand() % count + 1;
     for (k = 0; k < 8; k++)
-        used[k] = 0;
+        chosenOld[k] = 0;
     sep = "";
+    "";
     for (k = 0; k < n; k++) {
         do {
             d = rand() % 8;
-        } while (used[d] == 1);
+        } while (chosenOld[d] == 1);
         cprintf("%s%s", sep, drugname[d]);
         if (n == 2)
             sep = " and ";
         else
             sep = ", ";
-        used[d] = 1;
-        price[d] = price[d] * ((double)(rand() % rng / 100) + mul);
+        chosenOld[d] = 1;
+        streetPrice[d] = streetPrice[d] * ((double)(rand() % rng / 100) + mul);
         if (n > 2 && k + 2 == n)
             sep = ", and ";
     }
-    mkttoday = 1;
+    mktEvent2 = 1;
 }
 
 void pressany()
@@ -798,7 +801,7 @@ void pressany()
 
     cursor(0);
     flushkeys();
-    cprint("Press any key to continue", 27, 25);
+    cprint("\221\032Press any key to continue", 27, 25);
     setcolor(14, 0, 0);
     do {
         for (i = 0; i < 3; i++) {
@@ -841,13 +844,13 @@ int kind;
     register int si, di;
 
     cursor(0);
-    if (flag10[kind] == 1) return;
+    if (eventDone[kind] == 1) return;
     frame(1, 17, 80, 25);
     switch (kind) {
     case 0:
-        flag79f6 = 0;
+        chaseFlag = 0;
         state = 0;
-        if (guntype < 4) maxshots = 1;
+        if (gunKind < 4) maxshots = 1;
         else maxshots = 3;
         cprint("\221\004The \221\011cops \221\004are on your tail!!!", 27, 17);
         sfx(5);
@@ -860,9 +863,9 @@ int kind;
                 frame(1, 23, 80, 25);
                 cprint("\221\016Call it \020 ", 20, 23);
                 cursor(1);
-                esc = readfield(1, 0, inbuf2);
+                escapeF = readfield(1, 0, inputBuf);
                 cursor(0);
-                choice = atol(inbuf2);
+                choice = atol(inputBuf);
             } while (choice < 1 || choice > 3);
             if ((choice == 2 && status == 0) || (choice == 3 && status < 5)) {
                 cprint("\221\014You don't have enough points!", 25, 25);
@@ -904,10 +907,10 @@ int kind;
         cprint(txt[10], 9, 5);
         setcolor(12, 0, 0);
         gotoxy(20, 5);
-        cprintf("%-10d", ngun);
+        cprintf("%-10d", numGunsTmp);
         setcolor(6, 0, 0);
         gotoxy(20, 6);
-        cprintf("%-15s", gunname[guntype]);
+        cprintf("%-15s", gunname[gunKind]);
         hp[0] = health;
         setcolor(6, 0, 0);
         for (si = 1; si <= nfr; si++) {
@@ -963,19 +966,19 @@ again:
                     if (state != 2) {
                         for (si = 0; si <= nfr; si++) {
                             if (hp[si] == 0) continue;
-                            if (si < ngun) cprint("\221\014Firing", 28, si + 10);
+                            if (si < numGunsTmp) cprint("\221\014Firing", 28, si + 10);
                             else cprint("\221\014Punching", 27, si + 10);
                             shots = 0;
                             do {
                                 do {
                                     tgt = rand() % di;
                                 } while (chp[tgt] == 0);
-                                sfx(guntype + 10);
+                                sfx(gunKind + 10);
                                 if (rand() % 2 == 0) {
                                     cprint("\221\024*  Hit!  *", 67, tgt + 11);
                                     sfx(8);
                                     delay(100);
-                                    if (si < ngun) chp[tgt] -= dice(6, gunpow[guntype]);
+                                    if (si < numGunsTmp) chp[tgt] -= dice(6, gunpow[gunKind]);
                                     else chp[tgt] -= dice(4, 1);
                                     if (chp[tgt] <= 0) {
                                         chp[tgt] = 0;
@@ -987,7 +990,7 @@ again:
                                 drawhp(chp[tgt], tgt, 1);
                                 shots++;
                                 if (hp[0] == 0 || copsleft == 0) break;
-                            } while (guntype > 3 && shots < maxshots && copsleft > 0 && si < ngun);
+                            } while (gunKind > 3 && shots < maxshots && copsleft > 0 && si < numGunsTmp);
                             drawhp(hp[si], si, 0);
                             if (copsleft == 0) break;
                         }
@@ -1053,7 +1056,7 @@ again:
         cprint("\221\012Yous wasted 'em!!! Way ta go, man!!!", 23, 23);
         delay(1000);
         v20 = 1;
-        if (ctype < guntype && di <= ngun) goto skipask;
+        if (ctype < gunKind && di <= numGunsTmp) goto skipask;
         setcolor(7, 0, 0);
         gotoxy(21, 24);
         if (di == 1) strcpy(buf, "his gun");
@@ -1067,10 +1070,10 @@ again:
         if (key == 'Y') {
             cprint("\221\016You \221\014want\221\016 'em, you \221\014got \221\016'em!  What a bunch'a \221\006chumps!", 15, 25);
             v20 = 0;
-            if (guntype == ctype) ngun += di;
+            if (gunKind == ctype) numGunsTmp += di;
             else {
-                guntype = ctype;
-                ngun = di;
+                gunKind = ctype;
+                numGunsTmp = di;
             }
         } else
             cprint("\221\011OK, man, it's yer call.", 29, 25);
@@ -1088,7 +1091,7 @@ skipask:
         if (dead == 0) drawmain();
         break;
     case 1:
-        if (flag791e == 1) break;
+        if (mktEvent2 == 1) break;
         cprint("\221\013\"Hey man, check dis out!  Word has it on de street dat deres des cops, see?\r\nThey musta decided that workin' for 25 G's a year ain't enough, so de've\r\ndecided ta sell some of de take drugs confiscated on de side! De market is\r\nflooded with ", 1, 18);
         setcolor(6, 0, 1);
         marketevent(3, 30, 0.7f);
@@ -1110,7 +1113,7 @@ skipask:
         cprint("\221\007\332\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\277\r\n\263  * * *   \221\037E X T R A ! !   E X T R A ! !\221\007   * * *  \263\r\n\263               \221\037Read all about it!!\221\007               \263\r\n\303\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\264\r\n\263  After six months of undercover investigation,  \263\r\n\263  police close in and make a major drug bust!    \263\r\n\263  This will no doubt affect street drug prices.  \263\r\n\300\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\331", 15, 17);
         window(1, 1, 80, 25);
         for (si = 0; si < 8; si++)
-            price[si] = price[si] * ((double)(rand() % 25) / 100.0 + 1.05);
+            streetPrice[si] = streetPrice[si] * ((double)(rand() % 25) / 100.0 + 1.05);
         sfx(7);
         pressany();
         break;
@@ -1125,9 +1128,9 @@ skipask:
         pressany();
         break;
     case 5:
-        if (flag79d2 == 0) break;
+        if (drugsHeldX[5] == 0) break;
         cprint("\221\006Ya come back to yer place tonight and find dat yer sexy main squeeze tought\r\ndat it wouldst be a good idea to use some of yer weed to make brownies!!!\r\nAll tings considered, yous take it pretty well.  After all, if ya were mad,\r\nyou would've \221\007chopped \221\006up her body \221\014before \221\006dumping it in de river!", 1, 17);
-        flag79d2 = 0;
+        drugsHeldX[5] = 0;
         pressany();
         break;
     case 6:
@@ -1160,7 +1163,7 @@ skipask:
         pressany();
         break;
     case 7:
-        if (hold >= 300) break;
+        if (coatSize >= 300) break;
         do {
             v20 = rand() % 10 + 1;
             if (rand() % 5 == 0) {
@@ -1169,7 +1172,7 @@ skipask:
                     v20 += rand() % 10 + 1;
             }
             v20 *= 10;
-        } while (hold + 50 < v20 || v20 <= hold);
+        } while (coatSize + 50 < v20 || v20 <= coatSize);
         bm = pow((double)v20, 3.34) * 0.0634;
         bm = (long)((double)((rand() % 200 + 1) * bm) / 10000.0) * 100;
         cprint("\221\nYou are approached by a shady-lookin guy in a long dark trenchcoat.  He says:", 1, 17);
@@ -1193,7 +1196,7 @@ skipask:
             else {
                 cprint("\221\011\"You bought yourself one hell of a trenchcoat!\"", 16, 24);
                 cash -= bm;
-                hold = v20;
+                coatSize = v20;
             }
         } else
             cprint("\221\011\"OK, it's your loss, man.  What a shame!\"", 20, 24);
@@ -1232,12 +1235,12 @@ skipask:
                 cprint("\221\007\"I'm sorry, sir, but I only accept cash \221\017up-front\221\007.  Business is business.\"", 5, 24);
             else {
                 cprint("\221\007\"Very well, they will be delivered by tomorrow.  Good doing business with you.\"", 1, 24);
-                ngun = v1e;
-                guntype = v20 + 1;
+                numGunsTmp = v1e;
+                gunKind = v20 + 1;
                 cash -= v1a;
             }
         } else
-            cprint("\221\007\"I'm sorry, sir, but I only accept cash \221\017up-front\221\007.  Business is business.\"", 15, 24);
+            cprint("\221\007\"As you wish.  Perhaps next time we may do business.\"", 15, 24);
         pressany();
         break;
     case 9:
@@ -1261,14 +1264,14 @@ skipask:
         } else {
             cprint("\221\014Yeah, man, nobody pushes you around! I respect yer integrity!!!", 9, 24);
             if (rand() % 5 != 0) {
-                flag79f6 = 1;
-                flag10[0] = 0;
+                chaseFlag = 1;
+                eventDone[0] = 0;
             }
         }
         pressany();
         break;
     }
-    flag10[kind] = 1;
+    eventDone[kind] = 1;
     if (dead == 0) drawstatus();
 }
 
@@ -1302,7 +1305,7 @@ int playagain()
     box("\xc9\xcd\xbb\xba\xbc\xcd\xc8\xba", 29, 10, 51, 15);
     frame(30, 11, 50, 14);
     cprint("\x91\014Would ya like ta", 32, 12);
-    cprint("\x91\015play again? (Y/N)", 32, 13);
+    cprint("play again? (Y/N)", 32, 13);
     cursor(1);
     gotoxy(40, 14);
     while (1) {
@@ -1367,7 +1370,7 @@ void endgame()
         delay(500);
     }
     puttext(1, 1, 80, 25, savebuf2);
-    if (ngun < 10) guns = ngun;
+    if (numGunsTmp < 10) guns = numGunsTmp;
     else guns = 10;
     for (i = 1; i <= guns; i++) {
         if (i <= 4) {
@@ -1380,7 +1383,7 @@ void endgame()
             puttext(k, si, k + 7, si + 2, firebuf);
         }
     }
-    n = (int)((cash + bank - 1) / 2000000L) + 1;
+    n = (int)((cash + inBank - 1) / 2000000L) + 1;
     for (si = 0; si < 4; si++) {
         row = si + 11;
         for (k = 0; k < 5; k++) {
@@ -1398,43 +1401,43 @@ void endgame()
         }
     }
     nosound();
-    pct = goodDeals * 100 / totalDeals;
+    pct = profitDealsH * 100 / allDeals;
     ltoa(cash, s, 10);
     di = strlen(s);
     stpcpy(rep[6] + (0x29 - di), s);
-    ltoa(bank, s, 10);
+    ltoa(inBank, s, 10);
     di = strlen(s);
     stpcpy(rep[7] + (0x29 - di), s);
-    ltoa(debt, s, 10);
+    ltoa(owedVal, s, 10);
     di = strlen(s);
     stpcpy(rep[8] + (0x29 - di), s);
-    itoa(goodDeals, s, 10);
+    itoa(profitDealsH, s, 10);
     di = strlen(s);
     stpcpy(rep[9] + (0x29 - di), s);
-    itoa(totalDeals, s, 10);
+    itoa(allDeals, s, 10);
     di = strlen(s);
     stpcpy(rep[10] + (0x29 - di), s);
     itoa(pct, s, 10);
     di = strlen(s);
     stpcpy(rep[11] + (0x28 - di), s);
     strcat(rep[11], "%");
-    di = strlen(gunname[guntype]);
-    stpcpy(rep[12] + (0x17 - di), gunname[guntype]);
+    di = strlen(gunname[gunKind]);
+    stpcpy(rep[12] + (0x17 - di), gunname[gunKind]);
     stpcpy(rep[12] + 0x17, "'s:\221\036            ");
-    itoa(ngun, s, 10);
+    itoa(numGunsTmp, s, 10);
     di = strlen(s);
     stpcpy(rep[12] + (0x29 - di), s);
-    itoa(totaldays, s, 10);
+    itoa(daysPlayed, s, 10);
     di = strlen(s);
     stpcpy(rep[13] + (0x29 - di), s);
-    ex = exp((double)(cash + bank - debt) * 6.9315e-08);
+    ex = exp((double)(cash + inBank - owedVal) * 6.9315e-08);
     score = (long)ex * 75000L;
     if (score > 700000L) score = 700000L;
-    p2 = (long)(pow((double)totaldays, -2.12) * 104000000000.0);
+    p2 = (long)(pow((double)daysPlayed, -2.12) * 104000000000.0);
     if (p2 > 500000L) p2 = 500000L;
     score += p2;
     score += (long)(pow((double)pct, 8.14) * 2.48e-11);
-    score += (long)(guntype * ngun) * 1500L;
+    score += (long)(gunKind * numGunsTmp) * 1500L;
     ltoa(score, s, 10);
     di = strlen(s);
     stpcpy(rep[16] + (0x29 - di), s);
@@ -1481,9 +1484,9 @@ void endgame()
 
 void nextday()
 {
-    loandays--;
+    dueDays--;
     day++;
-    totaldays++;
+    daysPlayed++;
     if (dim[month - 1] < day) {
         day = 1;
         month++;
@@ -1494,8 +1497,8 @@ void nextday()
                 year = 0;
         }
     }
-    debt = debt * 1.05;
-    bank = bank * 1.000192;
+    owedVal = owedVal * 1.05;
+    inBank = inBank * 1.000192;
 }
 
 void intro()
@@ -1525,8 +1528,8 @@ void intro()
         count++;
     }
     if (count == 0) count = 1;
-    delaytime = 31 - 55 / count;
-    if (delaytime < 0) delaytime = 0;
+    delayUnit_ = 31 - 55 / count;
+    if (delayUnit_ < 0) delayUnit_ = 0;
     cprint("\221\012Version v2.01", 35, 13);
     cprint("\221\001\020\221\011\020\221\013\020   \221\036UNREGISTERED VERSION   \221\013\021\221\011\021\221\001\021", 24, 16);
     cprint("\221\014Written by Phil Erwin", 30, 19);
@@ -1578,36 +1581,36 @@ void newgame()
     setcolor(141, 0, 0);
     cprint("Initializing...", 34, 23);
     for (i = 0; i < 8; i++) {
-        inv[i] = 0;
-        bias[i] = 1.0;
-        flag8[i] = 0;
+        drugsHeldX[i] = 0;
+        drugBias5[i] = 1.0;
+        baseCost6[i] = 0;
     }
     for (i = 0; i < 10; i++)
-        flag10[i] = 0;
-    genprices(&price[0], &price[1], &price[2], &price[3], &price[4], &price[5], &price[6], &price[7]);
-    curcity = rand() % 8;
+        eventDone[i] = 0;
+    genprices(&streetPrice[0], &streetPrice[1], &streetPrice[2], &streetPrice[3], &streetPrice[4], &streetPrice[5], &streetPrice[6], &streetPrice[7]);
+    whereAmIZ = rand() % 8;
     cash = 500L;
-    hold = 10;
-    bank = 0L;
-    debt = 0L;
-    loanflag = 0;
-    miscA = 0;
-    guntype = 0;
+    coatSize = 10;
+    inBank = 0L;
+    owedVal = 0L;
+    hasLoan = 0;
+    numGunsTmp = 0;
+    gunKind = 0;
     status = 1;
     health = 100;
-    miscB = 0;
-    miscC = 0;
-    miscD = 0;
-    miscE = 0;
-    cashmisc = 0;
-    date1 = rand() % 12 + 1;
-    date2 = rand() % 28 + 1;
-    date3 = rand() % 6 + 86;
-    monofix(buf1);
-    monofix(buf2);
-    monofix(buf3);
-    monofix(buf4);
-    monofix(buf5);
+    dead = 0;
+    quietFlag = 0;
+    chaseFlag = 0;
+    bustFlag5 = 0;
+    daysPlayed = 0;
+    month = rand() % 12 + 1;
+    day = rand() % 28 + 1;
+    year = rand() % 6 + 86;
+    monofix(buf67d0);
+    monofix(firebuf);
+    monofix(barbuf);
+    monofix(savebuf);
+    monofix(savebuf2);
     delay(1000);
 }
 
@@ -1617,7 +1620,7 @@ char *s;
     int len;
     register int i;
 
-    if (g_mono == 1) {
+    if (mono == 1) {
         len = strlen(s);
         for (i = 1; i < len; i += 2) {
             if (s[i] <= 7)
@@ -1628,7 +1631,7 @@ char *s;
     }
 }
 
-void gamemain()
+void main()
 {
     int v;
     unsigned long lamt;
@@ -1644,10 +1647,10 @@ void gamemain()
     register int si, di;
 
     srand((unsigned)time(0));
-    gettextinfo(&ti);
-    if (ti.currmode == 7 || ti.currmode == 2) g_mono = 1;
-    else g_mono = 0;
-    if (ti.currmode == 0 || ti.currmode == 1) {
+    gettextinfo(&textInfo);
+    if (textInfo.currmode == 7 || textInfo.currmode == 2) mono = 1;
+    else mono = 0;
+    if (textInfo.currmode == 0 || textInfo.currmode == 1) {
         cputs("DRUGLORD requires 80 column mode.\r\n");
         exit(0);
     }
@@ -1682,12 +1685,12 @@ void gamemain()
                     gotoxy(1, 25);
                     clreol();
                     cprint("\221\nWhere ya wanna go? ", 1, 25);
-                    esc = readfield(2, 1, inbuf);
+                    escapeF = readfield(2, 1, inbuf);
                     cursor(0);
-                    if (esc == 1) break;
+                    if (escapeF == 1) break;
                     si = atol(inbuf);
                     if (si < 1 || si > 8) sfx(2);
-                    if (si - 1 == curcity) {
+                    if (si - 1 == whereAmIZ) {
                         cprint("\221\rAre you having \221\037flashbacks? \221\rThat's where you are now!", 28, 25);
                         sfx(3);
                         si = 0;
@@ -1695,42 +1698,42 @@ void gamemain()
                     }
                 } while (si < 1 || si > 8);
                 cursor(0);
-                if (esc == 1) continue;
-                if ((long)travelcost(curcity, si - 1) > cash) {
+                if (escapeF == 1) continue;
+                if ((long)travelcost(whereAmIZ, si - 1) > cash) {
                     cprint("\221\034Start flappin' yer arms, cause you ain't got de dough!", 25, 25);
                     sfx(3);
                     delay(2000);
                     continue;
                 }
-                cash -= travelcost(curcity, si - 1);
-                curcity = si - 1;
-                flag791e = 0;
-                genprices(&price[0], &price[1], &price[2], &price[3], &price[4], &price[5], &price[6], &price[7]);
+                cash -= travelcost(whereAmIZ, si - 1);
+                whereAmIZ = si - 1;
+                mktEvent2 = 0;
+                genprices(&streetPrice[0], &streetPrice[1], &streetPrice[2], &streetPrice[3], &streetPrice[4], &streetPrice[5], &streetPrice[6], &streetPrice[7]);
                 gotoxy(30, 25);
                 setcolor(15, 0, 0);
                 for (v = 79; v > 1; v -= 2) {
                     gettext(3, 19, v, 22, bigbuf);
                     puttext(1, 19, v - 2, 22, bigbuf);
                     sound((79 - v) * 20 + 1000);
-                    delay(delaytime);
+                    delay(delayUnit_);
                 }
                 nosound();
                 drawstatus();
-                for (v = 0; v < 10; v++) flag10[v] = 0;
+                for (v = 0; v < 10; v++) eventDone[v] = 0;
                 break;
             case 'B':
                 drawdruglist();
                 do {
                     cprint("\221\004What kinda drugs are\r\nya interested in? ", 1, 19);
                     setcolor(14, 0, 0);
-                    esc = readfield(1, 0, inbuf);
-                    if (esc == 1) break;
+                    escapeF = readfield(1, 0, inbuf);
+                    if (escapeF == 1) break;
                     di = atol(inbuf);
                     if (di < 1 || di > 8) sfx(2);
                 } while (di < 1 || di > 8);
-                if (esc == 1) continue;
+                if (escapeF == 1) continue;
                 di--;
-                maxbuy = cash / price[di];
+                maxbuy = cash / streetPrice[di];
                 cprint("\221\004How many do ya wanna buy?\r\n(", 1, 22);
                 setcolor(11, 0, 1);
                 cprintf("%ld", maxbuy);
@@ -1738,19 +1741,19 @@ void gamemain()
                 setcolor(14, 0, 0);
                 do {
                     gotoxy(27, 22);
-                    esc = readfield(5, 0, inbuf);
-                    if (esc == 1) break;
+                    escapeF = readfield(5, 0, inbuf);
+                    if (escapeF == 1) break;
                     amount = atol(inbuf);
                 } while (amount < 0 || inbuf[0] == 0);
                 cursor(0);
-                if (esc == 1) continue;
+                if (escapeF == 1) continue;
                 if ((long)amount > maxbuy) {
                     cprint("\221\035Hey man, if ya don't got enough\r\n  cash, don't come 'round here!", 3, 24);
                     sfx(3);
                     delay(1000);
                     continue;
                 }
-                if (amount > holdfree) {
+                if (amount > spaceLeft2) {
                     cprint("\221\nDude, you can't hold that much!\r\n  Everyone's got a limit, right?", 3, 24);
                     sfx(3);
                     delay(3000);
@@ -1760,12 +1763,12 @@ void gamemain()
                     cprint("\221\016* * *   \221\037S O L D ! ! !   \221\016* * *", 1, 25);
                     sfx(4);
                     delay(2000);
-                    inv[di] += amount;
-                    cash -= (long)amount * price[di];
-                    if (basis[di] == 0)
-                        basis[di] = price[di];
+                    drugsHeldX[di] += amount;
+                    cash -= (long)amount * streetPrice[di];
+                    if (baseCost6[di] == 0)
+                        baseCost6[di] = streetPrice[di];
                     else
-                        basis[di] = (price[di] + basis[di]) / 2;
+                        baseCost6[di] = (streetPrice[di] + baseCost6[di]) / 2;
                 }
                 break;
             case 'S':
@@ -1773,15 +1776,15 @@ void gamemain()
                 do {
                     cprint("\221\004What kinda drugs do\r\n ya want to unload? ", 1, 19);
                     setcolor(14, 0, 0);
-                    esc = readfield(1, 0, inbuf);
-                    if (esc == 1) break;
+                    escapeF = readfield(1, 0, inbuf);
+                    if (escapeF == 1) break;
                     di = atol(inbuf);
                     if (di < 1 || di > 8) sfx(2);
                 } while (di < 1 || di > 8);
                 cursor(0);
-                if (esc == 1) continue;
+                if (escapeF == 1) continue;
                 di--;
-                if (inv[di] == 0) {
+                if (drugsHeldX[di] == 0) {
                     cprint("\221\rGive me a break, man, you ain't got\r\nany of that!", 1, 22);
                     sfx(3);
                     delay(1000);
@@ -1790,13 +1793,13 @@ void gamemain()
                 do {
                     cprint("\221\004How many do ya wanna sell? ", 1, 22);
                     setcolor(14, 0, 0);
-                    esc = readfield(5, 0, inbuf);
-                    if (esc == 1) break;
+                    escapeF = readfield(5, 0, inbuf);
+                    if (escapeF == 1) break;
                     amount = atol(inbuf);
                 } while (amount < 0 || inbuf[0] == 0);
                 cursor(0);
-                if (esc == 1) continue;
-                if (inv[di] < amount) {
+                if (escapeF == 1) continue;
+                if (drugsHeldX[di] < amount) {
                     cprint("\221\025I happen to know that you ain't that\r\nmuch on ya, so quit trying to burn me!", 1, 24);
                     sfx(3);
                     delay(3000);
@@ -1806,17 +1809,17 @@ void gamemain()
                     cprint("\221\036You got yerself a deal, dude!", 1, 25);
                     sfx(4);
                     delay(2000);
-                    if (inv[di] - amount == 0) {
+                    if (drugsHeldX[di] - amount == 0) {
                         if (di < 3) bonus = (3 - di) * 3;
                         else bonus = 1;
                         oldstatus = status;
-                        status += (int)(((double)price[di] / (double)(unsigned long)basis[di] - 1.0) * 3.0 * bonus);
-                        totalDeals++;
-                        if (status > oldstatus) goodDeals++;
-                        basis[di] = 0;
+                        status += (int)(((double)streetPrice[di] / (double)(unsigned long)baseCost6[di] - 1.0) * 3.0 * bonus);
+                        allDeals++;
+                        if (status > oldstatus) profitDealsH++;
+                        baseCost6[di] = 0;
                     }
-                    inv[di] -= amount;
-                    cash += (long)amount * price[di];
+                    drugsHeldX[di] -= amount;
+                    cash += (long)amount * streetPrice[di];
                 }
                 break;
             case 'V':
@@ -1836,9 +1839,9 @@ void gamemain()
                     break;
                 }
                 setcolor(15, 0, 0);
-                esc = readfield(10, 0, inbuf);
+                escapeF = readfield(10, 0, inbuf);
                 cursor(0);
-                if (esc == 1) continue;
+                if (escapeF == 1) continue;
                 lamt = atol(inbuf);
                 if (lamt <= 0) continue;
                 switch (si) {
@@ -1853,12 +1856,12 @@ void gamemain()
                         sfx(2);
                         delay(2000);
                         cash -= lamt;
-                        bank += lamt;
+                        inBank += lamt;
                         drawstatus();
                     }
                     continue;
                 case 'W':
-                    if (lamt > bank) {
+                    if (lamt > inBank) {
                         cprint("\221\035You ain't got that much to pull out!", 25, 25);
                         sfx(3);
                         delay(1000);
@@ -1867,12 +1870,12 @@ void gamemain()
                         sfx(2);
                         delay(2000);
                         cash += lamt;
-                        bank -= lamt;
+                        inBank -= lamt;
                         drawstatus();
                     }
                     continue;
                 }
-                if (esc == 1) continue;
+                if (escapeF == 1) continue;
             case 'L':
                 cprint("\221\013Ya set foot in the 'sharks office.  You've been in locker rooms that smelled\r\nbetter than dis place!  His boys are lookin' tough in their nice goon suits,\r\nbut you don't pay dem no never-mind, cause the head-honcho, Guido is talkin...\r\n\n                    \221\nHe say, you wanna (\221\034B\221\n)orrow some cash,\r\n                      or do you wanna (\221\034P\221\n)ay me back? ", 1, 17);
                 cursor(1);
@@ -1884,7 +1887,7 @@ void gamemain()
                 if (si == 27) continue;
                 switch (si) {
                 case 'B':
-                    if (flag79fa == 1) {
+                    if (quietFlag == 1) {
                         cprint("\221\032\"Man, yer pushin' yer luck luck! I ought'ta kill you just for askin'!!\"", 5, 24);
                         delay(2000);
                         break;
@@ -1896,9 +1899,9 @@ void gamemain()
                     }
                     frame(1, 21, 80, 25);
                     cprint("\221\nHow much ya wanna borrow? ", 10, 22);
-                    esc = readfield(10, 0, inbuf);
+                    escapeF = readfield(10, 0, inbuf);
                     cursor(0);
-                    if (esc == 1) continue;
+                    if (escapeF == 1) continue;
                     lamt = atol(inbuf);
                     if (lamt <= 0) continue;
                     if (lamt < 1000) {
@@ -1913,11 +1916,11 @@ void gamemain()
                         delay(1000);
                         continue;
                     }
-                    days = (int)((log((double)status * 10000.0) - log((double)(debt + lamt))) / 0.182321556794) + 4;
-                    if ((lamt + debt) / 10000 > status || (days >= loandays && loanflag == 1)) {
+                    days = (int)((log((double)status * 10000.0) - log((double)(owedVal + lamt))) / 0.182321556794) + 4;
+                    if ((lamt + owedVal) / 10000 > status || (days >= dueDays && hasLoan == 1)) {
                         cprint("\221\013\"Look, you already owe me ", 1, 24);
                         setcolor(4, 0, 1);
-                        cprintf("%ld ", debt);
+                        cprintf("%ld ", owedVal);
                         setcolor(11, 0, 0);
                         cputs("bucks, I'm not givin ya THAT much more!!!");
                         cprint("\221\013Christ, what do I look like, Santi-Claus?\"", 20, 25);
@@ -1926,19 +1929,19 @@ void gamemain()
                         continue;
                     } else {
                         cprint("\221\r\"Alright, I'll loan ya de money, but if you welch, my boys will come lookin\r\nfor ya! I expect to see you here to pay me in full in ", 1, 24);
-                        debt += lamt;
+                        owedVal += lamt;
                         cash += lamt;
-                        loanflag = 1;
-                        loandays = days;
+                        hasLoan = 1;
+                        dueDays = days;
                         setcolor(4, 0, 1);
-                        cprintf("%d", loandays - 1);
+                        cprintf("%d", dueDays - 1);
                         cprint("\221\r days.\"", 99, 99);
                         sfx(2);
                         delay(2000);
                         break;
                     }
                 case 'P':
-                    if (debt == 0) {
+                    if (owedVal == 0) {
                         cprint("\221\013\"My books show dat you don't owe me nut'in... would youse like to take out\r\na little loan?\"", 1, 24);
                         sfx(3);
                         delay(2000);
@@ -1946,9 +1949,9 @@ void gamemain()
                     }
                     frame(1, 21, 80, 25);
                     cprint("\221\nHow much ya wanna pay back? ", 10, 22);
-                    esc = readfield(10, 0, inbuf);
+                    escapeF = readfield(10, 0, inbuf);
                     cursor(0);
-                    if (esc == 1) continue;
+                    if (escapeF == 1) continue;
                     lamt = atol(inbuf);
                     if (lamt <= 0) continue;
                     if (lamt > cash) {
@@ -1957,25 +1960,25 @@ void gamemain()
                         delay(1000);
                         continue;
                     }
-                    if (lamt >= debt) debt = 0;
-                    else debt -= lamt;
+                    if (lamt >= owedVal) owedVal = 0;
+                    else owedVal -= lamt;
                     cash -= lamt;
-                    if (debt > 0) {
+                    if (owedVal > 0) {
                         cprint("\221\013\"OK, but you still owe me ", 20, 24);
                         setcolor(12, 0, 1);
-                        cprintf("%ld ", debt);
+                        cprintf("%ld ", owedVal);
                         cprint("\221\013buck", 99, 99);
-                        if (debt > 1) cputs("s!\"");
+                        if (owedVal > 1) cputs("s!\"");
                         else cputs("!\"");
                         sfx(3);
                         delay(2000);
                         break;
                     } else {
                         cprint("\221\013\"Paid in full? Lucky for you, eh boys? Anytime yous need a loan, just come\r\nto me, I'll take care of ya...\"", 1, 24);
-                        loandays = 0;
-                        loanflag = 0;
-                        flag79fa = 0;
-                        flag7920 = 0;
+                        dueDays = 0;
+                        hasLoan = 0;
+                        quietFlag = 0;
+                        bustFlag5 = 0;
                         sfx(2);
                         delay(2000);
                         break;
@@ -2035,23 +2038,23 @@ void gamemain()
                 if (rand() % 2 == 0) event(7);
                 else event(8);
             }
-            if (flag79f6 == 1 || (status >= 100 && rand() % 400 < status && rand() % 8 == 0))
+            if (chaseFlag == 1 || (status >= 100 && rand() % 400 < status && rand() % 8 == 0))
                 event(0);
             if (dead || !running) break;
             if (rand() % 5 == 0)
                 event(rand() % 10);
             if (dead || !running) break;
-            if (loandays < 0 && loanflag == 1) {
+            if (dueDays < 0 && hasLoan == 1) {
                 frame(1, 17, 80, 25);
                 cprint("\221\013You're ambushed in a dark alley by Guido's thugs, must be 'bout ten guys!\r\nThe boss-man say \221\027\"Oh, man, you should'na missed de deadline, now me and\r\nboys are gonna have to break your legs! Maybe next time you'll learn, eh?\"\221\013\r\nDey take yous from all directions, you ain't gotta chance...\r\nOne steps out with a \221\026baseball bat \221\013and...\r\n", 1, 17);
                 delay(3000);
-                flag7920++;
-                for (v = 0; v < flag7920; v++) {
+                bustFlag5++;
+                for (v = 0; v < bustFlag5; v++) {
                     frame(1, 23, 80, 23);
                     delay(500);
                     cprint("\221\014* * *    \221\024C R A C K ! !   \221\014* * *", 25, 23);
                     health -= 25;
-                    flag79fa = 1;
+                    quietFlag = 1;
                     drawstatus();
                     cursor(0);
                     sfx(3);
@@ -2060,7 +2063,7 @@ void gamemain()
                 if (health > 0) {
                     cprint("\221\016\"Oh, one more 'ting... you got a week to come up with dinero, or we'll\r\n be back, comprende?\"", 1, 24);
                     delay(3000);
-                    loandays = 7;
+                    dueDays = 7;
                 } else
                     dead = 1;
                 pressany();

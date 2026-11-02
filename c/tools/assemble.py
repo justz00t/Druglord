@@ -105,11 +105,11 @@ for k in order:
     body = '\n'.join(keep).strip('\n')
     if k == 'playagain': w(endtext)
     w(body + '\n')
-open('DRUGLORD.C', 'w').write('\r\n'.join('\n'.join(o).split('\n')) + '\r\n')
+pass  # open('DRUGLORD.C', 'w').write('\r\n'.join('\n'.join(o).split('\n')) + '\r\n')
 
 # second module: the screen images
 blocks = [(0x3382, 0x4328, 'screen_title'), (0x4328, 0x50ea, 'buf4328'), (0x50ea, 0x511c, 'firebuf'), (0x511c, 0x60be, 'savebuf2'),
-          (0x60be, 0x64da, 'savebuf'), (0x64da, 0x64e6, 'barbuf'), (0x64e6, 0x67d0, 'tbuf'), (0x67d0, 0x72f2, 'buf67d0')]
+          (0x60be, 0x64da, 'savebuf'), (0x64da, 0x64e6, 'barbuf'), (0x64e6, 0x67d0, 'tbuf'), (0x67d0, 0x72f4, 'buf67d0')]
 s = ['/* screen images, linked after DRUGLORD.C */']
 for a, b, n in blocks:
     s.append('unsigned char %s[%d] = {\n%s\n};' % (n, b - a, hexrows(ds[a:b])))
