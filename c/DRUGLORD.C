@@ -1,3 +1,28 @@
+/*
+ * DRUGLORD.C -- source reconstruction of DRUGLORD.EXE v2.01
+ *               (shareware DOS game by Phil Erwin, FantasyWare Inc., 1991-93)
+ *
+ * This is NOT the author's original source.  It is a reconstruction written so
+ * that, compiled with Borland Turbo C 2.01 in the SMALL memory model, together
+ * with SCREENS.C and SCRMAIN.INC, it produces an EXE that is BYTE-FOR-BYTE
+ * IDENTICAL to the original DRUGLORD.EXE v2.01.
+ *
+ *     tcc -ms DRUGLORD.C SCREENS.C
+ *
+ * See README.md for the exact build steps.  Because the result has to match
+ * to the byte, the source looks a little odd in places (K&R style function
+ * headers, a few redundant statements, one struct that holds all globals).
+ * Each such spot is explained where it appears.  Don't "tidy" it up unless
+ * you re-run the comparison afterwards -- any change in the compiled code
+ * breaks the match.
+ *
+ * Game idea (a "Dope Wars" clone): you have 30-ish days of street dealing.
+ * Buy drugs where they are cheap, sell where they are expensive, travel
+ * between 8 cities, borrow from the loan shark, dodge the cops and muggers,
+ * and see which rank you reach at the end.  Status points ("status") measure
+ * your reputation as a dealer; reaching 300 ends the game early.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +33,9 @@
 #include <time.h>
 #include <bios.h>
 
+/* Prototypes.  Only the functions whose arguments must be pushed in a special
+ * way (a char argument, a float argument) need a full prototype; the rest are
+ * declared old-style, exactly like the original. */
 void setColor(int fg, int bg, char blink);
 void fillChars(char c, int n, char *buf);
 int readField(int width, char flag, char *buf);
@@ -16,15 +44,27 @@ void marketEvent(int count, int rng, float mul);
 extern void printColored(), setCursor(), playSound(), drawBox(), clearBox(), drawDrugNames(), drawStatus(), drawMainScreen(), drawCityMenu(), drawDrugMenu(), drawHitPoints(), pressAnyKey(), flushKeys(), generatePrices(), nextDay(), showIntro(), newGame(), fixForMono(), showEndGame(), randomEvent(), showDeathScreen();
 extern int rollDice(), askPlayAgain(), travelCost();
 
+/* Low and high price for one drug (see priceRange). */
 struct range { long lo, hi; };
 
+/* Big screen images that live in SCREENS.C (a second module, linked after this one). */
 extern char fightScreen[], gunSprite[], endScene[], deathScreen[], barSprite[], farewellScreen[];
 extern char titleArt[7][124];
-/* ---- initialised data ---- */
+
+/* =========================================================================
+ *  DATA (initialised)
+ * ========================================================================= */
+
+/* Top part (80x16 cells) of the main game screen: the frame, the headings
+ * and the "Drugs on Hand / Street Prices" boxes.  Every cell is two bytes:
+ * the IBM-PC character, then its colour attribute.  The bytes are in
+ * SCRMAIN.INC.  drawMainScreen() puts this on the screen. */
 unsigned char mainScreenTop[2560] = {
 #include "SCRMAIN.INC"
 };
+/* One unused byte; present in the original data segment between the two tables. */
 char padByte = 0;
+/* The eight drugs.  Index order matters everywhere: inventory[], price[], ... */
 char *drugName[8] = {
     "Cocaine",
     "Crack",
@@ -35,6 +75,7 @@ char *drugName[8] = {
     "Speed",
     "Ludes"
 };
+/* Short gun names shown in the status panel, indexed by gunType (0 = no gun). */
 char *gunName[6] = {
     "None",
     "Sat. Nt. Spcl",
@@ -43,6 +84,7 @@ char *gunName[6] = {
     "Uzi",
     "AK-47"
 };
+/* Long gun names used by the gun smuggler event; index = gunType - 1. */
 char *gunLongName[5] = {
     "Saturday Night Special",
     "Ruger Revolver",
@@ -50,6 +92,7 @@ char *gunLongName[5] = {
     "Uzi",
     "AK-47 Assault Rifle"
 };
+/* Text labels used when the main screen is drawn (see drawMainScreen). */
 char *label[14] = {
     "* * *",
     "D R U G   L O R D",
@@ -66,6 +109,7 @@ char *label[14] = {
     "Status Pts:",
     "Health:"
 };
+/* The eight cities you can travel to. */
 char *cityName[8] = {
     "Chicago",
     "Detroit",
@@ -76,6 +120,7 @@ char *cityName[8] = {
     "San Diego",
     "Washington D.C."
 };
+/* Map position (x, y) of each city; travelCost() uses the distance between two. */
 char cityCoords[8][2] = {
     {3, 2},
     {3, 1},
@@ -86,6 +131,8 @@ char cityCoords[8][2] = {
     {0, 3},
     {5, 2}
 };
+/* Price multiplier for [city][drug]: how much dearer (>1) or cheaper (<1) a
+ * drug is in a city compared with the average. */
 float cityPriceMult[8][8] = {
     {0.95f, 0.9f, 0.9f, 1.0f, 1.05f, 0.95f, 1.1f, 1.05f},
     {1.1f, 0.9f, 0.95f, 0.95f, 1.1f, 1.1f, 1.0f, 0.9f},
@@ -96,7 +143,9 @@ float cityPriceMult[8][8] = {
     {1.05f, 0.95f, 1.0f, 1.05f, 0.9f, 1.0f, 0.95f, 1.1f},
     {0.95f, 1.1f, 1.05f, 1.05f, 0.95f, 0.9f, 1.1f, 0.9f}
 };
+/* Damage multiplier per gun type (index 0 = fists / no gun). */
 int gunPower[6] = { 0, 1, 2, 4, 2, 4 };
+/* Base price range of each drug before the city multiplier is applied. */
 struct range priceRange[8] = {
     {40000L, 50000L},
     {25000L, 30000L},
@@ -107,46 +156,63 @@ struct range priceRange[8] = {
     {70L, 100L},
     {10L, 20L}
 };
+/* Days per month (no leap years). */
 int daysInMonth[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-/* ---- uninitialised data ---- */
+/* =========================================================================
+ *  DATA (uninitialised): the whole state of the game
+ * =========================================================================
+ *
+ * In the original program these were ordinary global variables.  Turbo C's
+ * linker places uninitialised globals in an order that depends on a hash of
+ * their NAMES, which we do not know, so the only reliable way to reproduce the
+ * original memory layout is to put them in one struct, listed here in their
+ * original address order.  Everything is accessed as g.something.
+ */
 struct GameState {
-    int marketNews;
-    int beatings;
-    float priceBias[8];
-    unsigned avgCost[8];
-    int escPressed;
-    int dead;
-    int holdFree;
-    long cash;
-    int day;
-    int monochrome;
-    int month;
-    int year;
-    int health;
-    long bank;
-    int gunType;
-    int holdSize;
-    int status;
-    long debt;
-    int city;
-    int hasLoan;
-    char lineBuf[80];
-    int inventory[8];
-    int loanDays;
-    int goodDeals;
-    int picked[8];
-    char eventDone[10];
-    int copChase;
-    int delayTime;
-    int sharkAngry;
-    int totalDeals;
-    struct text_info textInfo;
-    int totalDays;
-    long price[8];
-    int numGuns;
+    int  marketNews;     /* 1 = a "street news" price event already happened in this city */
+    int  beatings;       /* how many times the loan shark's thugs have beaten you up */
+    float priceBias[8];  /* per-drug price bias added in generatePrices() (1.0 at the start) */
+    unsigned avgCost[8]; /* average price you paid per drug (0 = none held); used to score profits */
+    int  escPressed;     /* last readField() result: 1 = the player pressed ESC */
+    int  dead;           /* 1 = you died */
+    int  holdFree;       /* free space left in the coat (scratch value, see drawStatus) */
+    long cash;           /* cash in hand */
+    int  day;            /* current date: day of month */
+    int  monochrome;     /* 1 = monochrome display (colours are mapped to grey) */
+    int  month;          /* current date: month */
+    int  year;           /* current date: year (two digits, starts in 1986-91) */
+    int  health;         /* hit points, 0-100; 0 = dead */
+    long bank;           /* money in the bank (earns interest) */
+    int  gunType;        /* 0 = no gun, 1..5 = type of gun carried */
+    int  holdSize;       /* trenchcoat capacity: how many items you can carry */
+    int  status;         /* status points (reputation); 300 or more ends the game */
+    long debt;           /* what you owe the loan shark (grows 5% a day) */
+    int  city;           /* index of the city you are in */
+    int  hasLoan;        /* 1 = you currently have a loan with a due date */
+    char lineBuf[80];    /* scratch text line (also used to build "----" lines) */
+    int  inventory[8];   /* how much of each drug you carry */
+    int  loanDays;       /* days left to repay the loan before the thugs come */
+    int  goodDeals;      /* number of sales that made a profit (for the final score) */
+    int  picked[8];      /* scratch: which drugs a market event already picked */
+    char eventDone[10];  /* 1 = random event number n already happened in this city */
+    int  copChase;       /* 1 = the cops are after you (you refused them earlier) */
+    int  delayTime;      /* animation speed, measured at start-up from the BIOS clock */
+    int  sharkAngry;     /* 1 = the loan shark won't lend to you any more */
+    int  totalDeals;     /* number of times you sold a whole stack of a drug */
+    struct text_info textInfo; /* video mode info from gettextinfo() */
+    int  totalDays;      /* days played so far */
+    long price[8];       /* today's street price of each drug */
+    int  numGuns;        /* how many guns you own (all of gunType) */
 };
 struct GameState g;
 
+/* =========================================================================
+ *  SCREEN AND SOUND HELPERS
+ * ========================================================================= */
+
+/* Select the text colour.  fg/bg are the usual 16 PC text colours.  blink != 0
+ * means "bright / blinking".  On a monochrome display everything is white,
+ * a non-zero background becomes grey, and blink selects high intensity. */
 void setColor(fg, bg, blink)
 int fg;
 int bg;
@@ -168,6 +234,9 @@ char blink;
     }
 }
 
+/* Print a string that may contain colour escapes.  The byte 0x91 introduces
+ * one: the next byte is the colour (values above 15 mean "colour - 16, and
+ * blinking").  Text is printed at (x,y) unless x == 99 (= "stay here"). */
 void printColored(s, x, y)
 char *s;
 int x;
@@ -202,12 +271,15 @@ int y;
     }
 }
 
+/* Throw away every pending key press. */
 void flushKeys()
 {
     while (kbhit())
         getch();
 }
 
+/* Show (on != 0) or hide (on == 0) the text cursor, using BIOS int 10h/AH=1.
+ * Hiding is done by giving the cursor an invalid scan-line range. */
 void setCursor(on)
 int on;
 {
@@ -221,6 +293,8 @@ int on;
     geninterrupt(0x10);
 }
 
+/* Sound effects through the PC speaker.  id 2 = cash/ding jingle, id 3 = the
+ * descending "bad news" tune.  Other ids just silence the speaker. */
 void playSound(id)
 int id;
 {
@@ -304,6 +378,8 @@ int id;
     nosound();
 }
 
+/* Draw a frame from (x1,y1) to (x2,y2).  chars[] holds the 8 border pieces
+ * as 8 bytes: top-left, top, top-right, right..., see the frame tables. */
 void drawBox(chars, x1, y1, x2, y2)
 char *chars;
 int x1, y1, x2, y2;
@@ -326,6 +402,7 @@ int x1, y1, x2, y2;
     }
 }
 
+/* Fill buf with n copies of c and terminate it (used to build horizontal lines). */
 void fillChars(c, n, buf)
 char c;
 int n;
@@ -338,6 +415,9 @@ char *buf;
     buf[n] = 0;
 }
 
+/* Read a line of text from the keyboard at the cursor into buf (a field of
+ * "width" characters, ENTER ends it, ESC cancels and sets g.escPressed).
+ * flag != 0 allows digits only (numeric entry). */
 int readField(width, flag, buf)
 int width;
 char flag;
@@ -403,6 +483,8 @@ char *buf;
     return 0;
 }
 
+/* Blank the screen rectangle (x1,y1)-(x2,y2) by making it a text window and
+ * clearing it, then restoring the full-screen window. */
 void clearBox(x1, y1, x2, y2)
 int x1, y1, x2, y2;
 {
@@ -412,6 +494,12 @@ int x1, y1, x2, y2;
     textmode(g.textInfo.currmode);
 }
 
+/* =========================================================================
+ *  MAIN SCREEN DRAWING
+ * ========================================================================= */
+
+/* Print the eight drug names in both lists (inventory on the left, street
+ * prices in the middle). */
 void drawDrugNames()
 {
     int i;
@@ -425,6 +513,9 @@ void drawDrugNames()
     }
 }
 
+/* Redraw all the numbers on the main screen: inventory, prices, city, free
+ * space in the coat, cash, bank, debt (+ days left on the loan), guns, gun
+ * name, status points, health (red & blinking when 25 or less) and the date. */
 void drawStatus()
 {
     register int i;
@@ -477,6 +568,8 @@ void drawStatus()
     cprintf("%#02d/%#02d/%#02d", g.month, g.day, g.year);
 }
 
+/* Draw the static part of the main screen: clear, copy the 80x16 template
+ * (mainScreenTop) to the screen and add the coloured labels on top of it. */
 void drawMainScreen()
 {
     setCursor(0);
@@ -511,6 +604,8 @@ void drawMainScreen()
     printColored("v2.01", 74, 2);
 }
 
+/* Price of a plane ticket between cities a and b: straight-line distance on
+ * the map (cityCoords) times 60, plus 25 dollars. */
 int travelCost(a, b)
 int a, b;
 {
@@ -518,6 +613,8 @@ int a, b;
                        pow((double)(cityCoords[b][1] - cityCoords[a][1]), 2.0)) * 60.0 + 25.0);
 }
 
+/* Draw the "Drug Cities" menu (two columns of four) with the ticket price
+ * next to every city except the one you are in. */
 void drawCityMenu()
 {
     int j;
@@ -544,6 +641,10 @@ void drawCityMenu()
     }
 }
 
+/* Roll new street prices for all eight drugs.  Each price is a random value in
+ * the drug's range, plus g.priceBias, times the current city's multiplier.
+ * (The original passes the eight price slots as eight pointers -- an odd
+ * choice, but it has to stay for the bytes to match.) */
 void generatePrices(long *p0, long *p1, long *p2, long *p3, long *p4, long *p5, long *p6, long *p7)
 {
     *p0 = (long)(((double)(rand() % (priceRange[0].hi - priceRange[0].lo) + priceRange[0].lo) + g.priceBias[0]) * cityPriceMult[g.city][0]);
@@ -556,6 +657,7 @@ void generatePrices(long *p0, long *p1, long *p2, long *p3, long *p4, long *p5, 
     *p7 = (long)(((double)(rand() % (priceRange[7].hi - priceRange[7].lo) + priceRange[7].lo) + g.priceBias[7]) * cityPriceMult[g.city][7]);
 }
 
+/* Roll "count" dice with "sides" sides each and return the total. */
 int rollDice(sides, count)
 int sides, count;
 {
@@ -567,6 +669,7 @@ int sides, count;
     return sum;
 }
 
+/* Draw the numbered list of drugs (1-8) in the bottom panel, used when buying or selling. */
 void drawDrugMenu()
 {
     register int i;
@@ -591,6 +694,8 @@ void drawDrugMenu()
     setCursor(1);
 }
 
+/* Fight screen: show the hit points of one fighter.  side 0 = you, otherwise
+ * the opponent.  Shows "Alive" or "Dead". */
 void drawHitPoints(hp, row, side)
 int hp, row, side;
 {
@@ -610,6 +715,9 @@ int hp, row, side;
     cprintf("%4d            %-12s", hp, s);
 }
 
+/* A "street news" price event: pick 1..count different drugs, announce them
+ * ("X, Y, and Z") and multiply their price by (random 0..rng/100) + mul.
+ * Used for both price spikes (mul large) and busts (mul small). */
 void marketEvent(int count, int rng, float mul)
 {
     int n;
@@ -638,6 +746,7 @@ void marketEvent(int count, int rng, float mul)
     g.marketNews = 1;
 }
 
+/* Show "Press any key to continue" with a spinning marker and wait for a key. */
 void pressAnyKey()
 {
     char spin[3] = { 0xf9, 0x09, 0x4f };
@@ -659,6 +768,21 @@ void pressAnyKey()
     clearBox(25, 25, 54, 25);
 }
 
+/* =========================================================================
+ *  RANDOM EVENTS
+ * =========================================================================
+ *
+ * Handles one random event.  "kind" is the event number:
+ *   0  the cops attack (a fight screen)            5  girlfriend bakes your weed
+ *   1  cops sell confiscated drugs  (prices down)  6  a mugger robs you
+ *   2  cheap homemade drugs         (prices down)  7  trenchcoat salesman
+ *   3  big drug bust                (all up)       8  gun smuggler
+ *   4  a factory burns down         (one up)       9  blackmail letter
+ * Each event can happen only once per city visit (g.eventDone[kind]).
+ *
+ * The first case is by far the longest: it is the cop fight.  The unusual
+ * local names (v20, v1e, ...) are the original compiler's stack slots reused
+ * by several cases; their meaning is explained in each case. */
 void randomEvent(kind)
 int kind;
 {
@@ -691,12 +815,20 @@ int kind;
     if (g.eventDone[kind] == 1) return;
     clearBox(1, 17, 80, 25);
     switch (kind) {
+    /* ---- Event 0: the cops fight --------------------------------
+     * Fighters on your side: hp[0] is you, hp[1..nfr] are friends/posse.
+     * Cops: chp[0..di-1] (di = number of cops, ctype = their gun type).
+     * state: 0 = normal, 1 = escaped, 2 = tried to run and failed (cops shoot first).
+     */
     case 0:
         g.copChase = 0;
         state = 0;
         if (g.gunType < 4) maxshots = 1;
         else maxshots = 3;
         printColored("\221\004The \221\011cops \221\004are on your tail!!!", 27, 17);
+        /* Ask how you want to face them: alone, with a friend (costs 1 status
+         * point) or with a posse (costs 5 status points).
+         */
         playSound(5);
         printColored("\221\012Do you wanna   \221\0341\221\012) Go at it alone", 15, 19);
         printColored("\221\0342\221\012) Call a friend (1 status pt.)", 30, 20);
@@ -719,6 +851,7 @@ int kind;
             } else
                 break;
         }
+        /* nfr = number of helpers who fight next to you. */
         switch (choice) {
         case 1:
             nfr = 0;
@@ -733,6 +866,7 @@ int kind;
             g.status -= 5;
             break;
         }
+        /* Draw the fight screen and its captions. */
         clearBox(1, 1, 80, 25);
         puttext(1, 1, 80, 22, fightScreen);
         setColor(14, 0, 0);
@@ -755,6 +889,8 @@ int kind;
         setColor(6, 0, 0);
         gotoxy(20, 6);
         cprintf("%-15s", gunName[g.gunType]);
+        /* Hit points: yours, then every helper (25..34 plus bonus dice from status).
+         */
         hp[0] = g.health;
         setColor(6, 0, 0);
         for (si = 1; si <= nfr; si++) {
@@ -763,6 +899,10 @@ int kind;
             if (choice == 2) cprintf("%10s:", "Friend");
             if (choice == 3) cprintf("%6s #%2d:", "Posse", si);
         }
+/* Choose the cops: how many (di) and how strong (ctype is the gun type,
+ * limited to 2 or 3, tougher with more status).  Re-roll until valid.
+ * Once in 20 times a bigger squad appears.
+ */
 again:
         di = rand() % 8 + 3;
         ctype = g.status / (di * 2);
@@ -789,12 +929,14 @@ again:
             cprintf("%6s #%2d", "Cop", si + 1);
             chp[si] = rollDice(15, 2) + 15;
         }
+        /* Cop hit points: two 15-sided dice + 15 each. */
         copsleft = di;
         alive = nfr + 1;
         for (si = 0; si <= nfr; si++)
             drawHitPoints(hp[si], si, 0);
         for (si = 0; si < di; si++)
             drawHitPoints(chp[si], si, 1);
+        /* Fight round loop: ask Fight or Run, then play the round. */
         do {
             clearBox(1, 24, 80, 25);
             printColored("\221\017Do ya wanna (\221\034F\221\017)ight or (\221\034R\221\017)un? ", 5, 24);
@@ -806,6 +948,10 @@ again:
             putch(key);
             while (1) {
                 switch (key) {
+                /* Your side shoots first (unless you just failed to run).  Each fighter
+                 * fires at a random living cop; 50% hit chance.  Guns hit with
+                 * rollDice(6, gunPower), bare fists with a single d4.
+                 */
                 case 'F':
                     if (state != 2) {
                         for (si = 0; si <= nfr; si++) {
@@ -839,6 +985,9 @@ again:
                             if (copsleft == 0) break;
                         }
                     }
+                    /* The surviving cops shoot back at random living members of your side.
+                     * Every one of your helpers who dies costs you a status point.
+                     */
                     if (copsleft == 0) break;
                     state = 0;
                     for (si = 0; si < di; si++) {
@@ -868,6 +1017,8 @@ again:
                         if (hp[0] == 0 || alive == 0) break;
                     }
                     break;
+                /* Run away: succeeds when a random roll (+cops/3) is lower than yours (+helpers/3).
+                 */
                 case 'R':
                     printColored("\221\013You take off running... ", 20, 25);
                     delay(3000);
@@ -886,11 +1037,13 @@ again:
                 break;
             }
         } while (copsleft > 0 && alive > 0 && hp[0] > 0 && state != 1);
+        /* You got away. */
         if (state == 1) {
             delay(3000);
             drawMainScreen();
             break;
         }
+        /* Fight over.  If you died the game ends; otherwise the cops are dead. */
         g.health = hp[0];
         if (g.health == 0) {
             g.dead = 1;
@@ -899,7 +1052,9 @@ again:
         clearBox(1, 23, 80, 25);
         printColored("\221\012Yous wasted 'em!!! Way ta go, man!!!", 23, 23);
         delay(1000);
+        /* v20 = 1 means "sell the guns" (default); 0 if you took them instead. */
         v20 = 1;
+        /* If you already own better and enough guns, don't even ask. */
         if (ctype < g.gunType && di <= g.numGuns) goto skipask;
         setColor(7, 0, 0);
         gotoxy(21, 24);
@@ -911,6 +1066,7 @@ again:
             key = toupper(getch());
         } while (key != 'Y' && key != 'N');
         setCursor(0);
+        /* Taking their guns: add to your collection or swap to the better type. */
         if (key == 'Y') {
             printColored("\221\016You \221\014want\221\016 'em, you \221\014got \221\016'em!  What a bunch'a \221\006chumps!", 15, 25);
             v20 = 0;
@@ -923,6 +1079,8 @@ again:
             printColored("\221\011OK, man, it's yer call.", 29, 25);
         delay(2000);
 skipask:
+        /* Otherwise sell the guns: 200 dollars per gun per gun-type level, plus status.
+         */
         if (v20 == 1) {
             printColored("\221\013You sell the ", 5, 24);
             loot = di * ctype * 200;
@@ -934,6 +1092,9 @@ skipask:
         }
         if (g.dead == 0) drawMainScreen();
         break;
+    /* ---- Event 1: police sell confiscated drugs.  1-3 drugs drop to
+     * 70..99% of their price.  Skipped if a price event already ran.
+     */
     case 1:
         if (g.marketNews == 1) break;
         printColored("\221\013\"Hey man, check dis out!  Word has it on de street dat deres des cops, see?\r\nThey musta decided that workin' for 25 G's a year ain't enough, so de've\r\ndecided ta sell some of de take drugs confiscated on de side! De market is\r\nflooded with ", 1, 18);
@@ -944,6 +1105,7 @@ skipask:
         playSound(6);
         pressAnyKey();
         break;
+    /* ---- Event 2: cheap homemade stuff.  1-3 drugs drop to 60..89%. */
     case 2:
         printColored("\221\007\"Hey, I heard it through de grapevine dat deres some cheap homemade stuff\r\navailable from some of the homeboys downtown.  Real primo stuff, dey say!\r\nAll I hear on de streets is 'Cheap ", 1, 18);
         setColor(6, 0, 1);
@@ -952,6 +1114,9 @@ skipask:
         cprintf("!'\"");
         pressAnyKey();
         break;
+    /* ---- Event 3: "EXTRA!" newspaper - a drug bust.  Every price rises 5..29%.
+     * The newspaper is a boxed text drawn with line-drawing characters.
+     */
     case 3:
         window(15, 17, 80, 25);
         printColored("\221\007\332\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\277\r\n\263  * * *   \221\037E X T R A ! !   E X T R A ! !\221\007   * * *  \263\r\n\263               \221\037Read all about it!!\221\007               \263\r\n\303\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\264\r\n\263  After six months of undercover investigation,  \263\r\n\263  police close in and make a major drug bust!    \263\r\n\263  This will no doubt affect street drug prices.  \263\r\n\300\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\331", 15, 17);
@@ -961,6 +1126,9 @@ skipask:
         playSound(7);
         pressAnyKey();
         break;
+    /* ---- Event 4: a supplier's factory is destroyed.  One drug costs
+     * 120..159% of the normal price.
+     */
     case 4:
         printColored("\221\r\"Dude, I got some news for ya... a factory of one of de cities biggest suppliersof ", 1, 18);
         setColor(6, 0, 1);
@@ -971,12 +1139,19 @@ skipask:
         printColored("last night.  I don't have to tell ya what this'll on de\r\nstreet...\"", 99, 99);
         pressAnyKey();
         break;
+    /* ---- Event 5: your girlfriend turns all your weed (drug #5) into brownies.
+     * Only happens if you actually carry some.
+     */
     case 5:
         if (g.inventory[5] == 0) break;
         printColored("\221\006Ya come back to yer place tonight and find dat yer sexy main squeeze tought\r\ndat it wouldst be a good idea to use some of yer weed to make brownies!!!\r\nAll tings considered, yous take it pretty well.  After all, if ya were mad,\r\nyou would've \221\007chopped \221\006up her body \221\014before \221\006dumping it in de river!", 1, 17);
         g.inventory[5] = 0;
         pressAnyKey();
         break;
+    /* ---- Event 6: a mugger.  With 10+ status you may talk your way out
+     * (costs 10 status).  Otherwise he takes ALL your cash; if you had less
+     * than $50 he shoots you instead (2..12 damage).
+     */
     case 6:
         printColored("\221\014Yer walking along de street at night, when from outta nowhere jumps dis goon!\r\nHe waves a 9mm Beretta at yous and demands yer fork over all yer money.", 1, 17);
         while (1) {
@@ -1006,6 +1181,10 @@ skipask:
         }
         pressAnyKey();
         break;
+    /* ---- Event 7: trenchcoat salesman.  Offers a bigger coat (capacity in
+     * v20, a multiple of 10, up to 50 more than yours).  The price bm grows
+     * with the capacity: capacity^3.34 * 0.0634, times a random 1-200%.
+     */
     case 7:
         if (g.holdSize >= 300) break;
         do {
@@ -1046,6 +1225,10 @@ skipask:
             printColored("\221\011\"OK, it's your loss, man.  What a shame!\"", 20, 24);
         pressAnyKey();
         break;
+    /* ---- Event 8: gun smuggler Juan.  v20 = gun type offered (0-4),
+     * v1e = how many, v1c = price each, v1a = total.  Buying replaces
+     * your present guns with the new batch.
+     */
     case 8:
         v20 = rand() % 5;
         if (rand() % 10 == 0) v1e = rand() % 6 + 5;
@@ -1087,6 +1270,10 @@ skipask:
             printColored("\221\007\"As you wish.  Perhaps next time we may do business.\"", 15, 24);
         pressAnyKey();
         break;
+    /* ---- Event 9: blackmail.  Only if you have $10000+.  Demands 70..99% of
+     * your cash (rounded to thousands).  If you refuse, 80% of the time
+     * the cops will come after you (event 0 is re-armed).
+     */
     case 9:
         if (g.cash < 10000L) break;
         f = rand() % 30 / 100.0 + 0.7;
@@ -1115,10 +1302,14 @@ skipask:
         pressAnyKey();
         break;
     }
+    /* Remember that this event has happened in this city. */
     g.eventDone[kind] = 1;
     if (g.dead == 0) drawStatus();
 }
 
+/* Text of the final score screen (shown in a scrolling box by showEndGame).
+ * showEndGame() fills the numbers in at the right-hand end of the lines
+ * (that is why the strings contain blanks).  \221 = colour escape. */
 char endText[18][50] = {
     "           \221\034CONGRATULATIONS!!!         ",
     "                                      ",
@@ -1140,6 +1331,7 @@ char endText[18][50] = {
     "\221\007                   RANK:\221\036              "
 };
 
+/* "Would ya like ta play again? (Y/N)".  Returns 1 for yes, 0 for no. */
 int askPlayAgain()
 {
     char c;
@@ -1166,6 +1358,7 @@ int askPlayAgain()
     return r;
 }
 
+/* You died: show the death picture for a few seconds and wait for a key. */
 void showDeathScreen()
 {
     register int x, y;
@@ -1179,6 +1372,21 @@ void showDeathScreen()
     getch();
 }
 
+/* =========================================================================
+ *  END OF THE GAME
+ * =========================================================================
+ *
+ * Reached when your status hits 300.  Plays a victory jingle, draws the
+ * money stacks and guns you own as pictures, builds the score table in
+ * endText[], computes your score and rank and lets you scroll through it
+ * with the arrow keys until you press ESC.
+ *
+ * Score = (e^(net worth * 6.9315e-8) * 75000, capped at 700000)
+ *       + (days-based bonus 104e9 / days^2.12, capped at 500000)
+ *       + (percent of good deals)^8.14 * 2.48e-11
+ *       + 1500 per gun (gun type * number of guns)
+ * and the rank is the number of thresholds in thr[] that it reaches.
+ * (6.9315e-8 is ln(2)/10,000,000: net worth doubles the base every 10 million.) */
 void showEndGame()
 {
     int i, j, k, x, row, n, d, m, pct, rank;
@@ -1199,6 +1407,8 @@ void showEndGame()
 
     delay(1000);
     clearBox(1, 17, 80, 25);
+    /* Flash "DRUGLORD!!!" five times in different colours with a little tune.
+     */
     for (i = 1; i < 6; i++) {
         clearBox(15, 20, 65, 20);
         setColor(i + 9, 0, i % 2 == 1);
@@ -1213,6 +1423,7 @@ void showEndGame()
         nosound();
         delay(500);
     }
+    /* Draw the end scene, then one gun picture for each gun owned (max 10). */
     puttext(1, 1, 80, 25, endScene);
     if (g.numGuns < 10) guns = g.numGuns;
     else guns = 10;
@@ -1227,6 +1438,9 @@ void showEndGame()
             puttext(k, si, k + 7, si + 2, gunSprite);
         }
     }
+    /* Draw stacks of money: each step of $100000 adds a block, each $2000000
+     * starts a new layer, accompanied by rising beeps.
+     */
     n = (int)((g.cash + g.bank - 1) / 2000000L) + 1;
     for (si = 0; si < 4; si++) {
         row = si + 11;
@@ -1245,6 +1459,7 @@ void showEndGame()
         }
     }
     nosound();
+    /* Fill the numbers into the score table (right-aligned, column 0x29). */
     pct = g.goodDeals * 100 / g.totalDeals;
     ltoa(g.cash, s, 10);
     di = strlen(s);
@@ -1274,6 +1489,7 @@ void showEndGame()
     itoa(g.totalDays, s, 10);
     di = strlen(s);
     stpcpy(endText[13] + (0x29 - di), s);
+    /* Now the score (see the formula above). */
     ex = exp((double)(g.cash + g.bank - g.debt) * 6.9315e-08);
     score = (long)ex * 75000L;
     if (score > 700000L) score = 700000L;
@@ -1285,6 +1501,7 @@ void showEndGame()
     ltoa(score, s, 10);
     di = strlen(s);
     stpcpy(endText[16] + (0x29 - di), s);
+    /* Find the rank title that goes with the score. */
     for (rank = 0; rank < 10; rank++) {
         if (thr[rank] > score) break;
     }
@@ -1297,6 +1514,9 @@ void showEndGame()
     setColor(14, 0, 0);
     for (si = 0; si < 5; si++)
         printColored(endText[si], 15, si + 19);
+    /* Scroll loop: UP/DOWN arrows (extended keys 0x48/0x50) move the text,
+     * ESC leaves.
+     */
     si = 0;
     while (1) {
         key = getch();
@@ -1326,6 +1546,8 @@ void showEndGame()
     }
 }
 
+/* Advance the calendar one day.  The loan grows 5% a day and the bank
+ * account earns 0.0192% a day.  Years are two digits (wrap at 100). */
 void nextDay()
 {
     g.loanDays--;
@@ -1345,6 +1567,11 @@ void nextDay()
     g.bank = g.bank * 1.000192;
 }
 
+/* Title screen.  First measures the computer speed by counting how often the
+ * title can be drawn in one BIOS clock tick -> g.delayTime, which keeps
+ * animations the same speed on fast and slow PCs.  Then the title art is
+ * revealed in random order, block by block, until it is done or a key
+ * is pressed. */
 void showIntro()
 {
     char ch;
@@ -1414,6 +1641,8 @@ void showIntro()
     }
 }
 
+/* Set up a new game: show "Initializing...", clear inventory, roll starting
+ * prices, city and date, start with $500 and a 10-item coat. */
 void newGame()
 {
     register int i;
@@ -1458,6 +1687,8 @@ void newGame()
     delay(1000);
 }
 
+/* On a monochrome display, remap every colour attribute byte (the odd bytes)
+ * of a text-mode picture to white or grey (keeping the blink bit). */
 void fixForMono(s)
 char *s;
 {
@@ -1475,6 +1706,9 @@ char *s;
     }
 }
 
+/* =========================================================================
+ *  MAIN PROGRAM
+ * ========================================================================= */
 void main()
 {
     int v;
@@ -1490,6 +1724,9 @@ void main()
     char bigbuf[1280];
     register int si, di;
 
+    /* Start-up: seed the random generator, detect monochrome (modes 2 and 7)
+     * and refuse to run in 40 column modes.
+     */
     srand((unsigned)time(0));
     gettextinfo(&g.textInfo);
     if (g.textInfo.currmode == 7 || g.textInfo.currmode == 2) g.monochrome = 1;
@@ -1499,11 +1736,14 @@ void main()
         exit(0);
     }
     showIntro();
+    /* Outer loop: one pass per game; ends when the player does not want to play again.
+     */
     running = 1;
     do {
         newGame();
         drawMainScreen();
         drawStatus();
+        /* One pass of this loop = one player action, followed by a day passing. */
         while (1) {
             setCursor(0);
             clearBox(1, 17, 80, 25);
@@ -1513,6 +1753,7 @@ void main()
             window(1, 1, 80, 25);
             printColored("\221\007Here's a list of yer possible plans, dude:", 20, 18);
             printColored("\221\007Make up your mind \221\011\020 ", 30, 25);
+            /* 300 status points = you won; leave to the end screen. */
             if (g.status >= 300) break;
             setColor(15, 0, 0);
             setCursor(1);
@@ -1522,7 +1763,11 @@ void main()
             } while (key != 'B' && key != 'S' && key != 'J' && key != 'V' && key != 'L' && key != 'H' && key != 'Q');
             setCursor(0);
             clearBox(1, 17, 80, 25);
+            /* Execute the chosen command. */
             switch (key) {
+            /* ---- Jet to another city: pick 1-8, pay the fare, and a "slide" animation
+             * scrolls the lower panel while the new prices are rolled.
+             */
             case 'J':
                 drawCityMenu();
                 do {
@@ -1565,6 +1810,9 @@ void main()
                 drawStatus();
                 for (v = 0; v < 10; v++) g.eventDone[v] = 0;
                 break;
+            /* ---- Buy drugs.  Average cost per drug (avgCost) is the mean of the old
+             * average and today's price; it is used later to score profits.
+             */
             case 'B':
                 drawDrugMenu();
                 do {
@@ -1615,6 +1863,10 @@ void main()
                         g.avgCost[di] = (g.price[di] + g.avgCost[di]) / 2;
                 }
                 break;
+            /* ---- Sell drugs.  If you sell the whole stack the status changes by the
+             * profit ratio ((price/avgCost - 1) * 3 * bonus).  "bonus" is the
+             * factor 9, 6 or 3 for the three cheapest drugs, 1 for the rest.
+             */
             case 'S':
                 drawDrugMenu();
                 do {
@@ -1666,6 +1918,7 @@ void main()
                     g.cash += (long)amount * g.price[di];
                 }
                 break;
+            /* ---- Visit the bank: Deposit or Withdraw.  ESC (27) cancels. */
             case 'V':
                 printColored("\221\017You arrive at the First World Bank of America.\r\n\n               \221\nWould ya like to (\221\034D\221\n)eposit  some moola,\r\n                             or (\221\034W\221\n)ithdraw some moola? ", 20, 18);
                 setCursor(1);
@@ -1689,6 +1942,7 @@ void main()
                 lamt = atol(inbuf);
                 if (lamt <= 0) continue;
                 switch (si) {
+                /* Deposit. */
                 case 'D':
                     if (lamt > g.cash) {
                         printColored("\221\035You ain't got that much to deposit!", 25, 25);
@@ -1704,6 +1958,7 @@ void main()
                         drawStatus();
                     }
                     continue;
+                /* Withdraw. */
                 case 'W':
                     if (lamt > g.bank) {
                         printColored("\221\035You ain't got that much to pull out!", 25, 25);
@@ -1719,6 +1974,10 @@ void main()
                     }
                     continue;
                 }
+                /* The two bank cases above always `continue`, so the code never runs
+                 * through into the loan shark case; the original compiler simply laid the
+                 * cases out this way, so we reproduce it.
+                 */
                 if (g.escPressed == 1) continue;
             case 'L':
                 printColored("\221\013Ya set foot in the 'sharks office.  You've been in locker rooms that smelled\r\nbetter than dis place!  His boys are lookin' tough in their nice goon suits,\r\nbut you don't pay dem no never-mind, cause the head-honcho, Guido is talkin...\r\n\n                    \221\nHe say, you wanna (\221\034B\221\n)orrow some cash,\r\n                      or do you wanna (\221\034P\221\n)ay me back? ", 1, 17);
@@ -1730,6 +1989,11 @@ void main()
                 setCursor(0);
                 if (si == 27) continue;
                 switch (si) {
+                /* Borrow: refused if the shark is angry, if you have no status, below
+                 * $1000, or if the total debt would be too large for your status
+                 * (max debt = status * $10000).  The loan time (days) shrinks as the
+                 * debt grows: log(status*10000 / total debt) / log(1.2) + 4.
+                 */
                 case 'B':
                     if (g.sharkAngry == 1) {
                         printColored("\221\032\"Man, yer pushin' yer luck luck! I ought'ta kill you just for askin'!!\"", 5, 24);
@@ -1784,6 +2048,9 @@ void main()
                         delay(2000);
                         break;
                     }
+                /* Pay back all or part of the debt; paying it in full clears
+                 * the deadline and the shark's anger.
+                 */
                 case 'P':
                     if (g.debt == 0) {
                         printColored("\221\013\"My books show dat you don't owe me nut'in... would youse like to take out\r\na little loan?\"", 1, 24);
@@ -1829,6 +2096,9 @@ void main()
                     }
                 }
                 break;
+            /* ---- Hospital: costs $10 per missing hit point and takes 1 day per $15
+             * (bonus is reused here as the bill).
+             */
             case 'H':
                 if (g.health == 100) {
                     printColored("\221\017Ya have de doc check yous out, but aside from yer bunions\r\n              on yer feet, youse is fit as a fiddle!", 15, 19);
@@ -1865,6 +2135,7 @@ void main()
                     }
                 }
                 break;
+            /* ---- Quit the game (ask for confirmation). */
             case 'Q':
                 printColored("\221\007Are ya sure ya wanna \221\026chicken out \221\007an' \221\024QUIT? \221\007(Y/N) ", 15, 20);
                 setCursor(1);
@@ -1875,19 +2146,30 @@ void main()
                 running = 0;
                 break;
             }
+            /* Every action ends the day: update the calendar and the display, then
+             * see what the day brings.
+             */
             nextDay();
             drawStatus();
             if (g.dead || !running) break;
+            /* Rare events for high rollers: trenchcoat (7) or gun smuggler (8). */
             if (rand() % 10 == 0 && rand() % (g.status / 20 + 1) > 4) {
                 if (rand() % 2 == 0) randomEvent(7);
                 else randomEvent(8);
             }
+            /* The cops: always after a refused blackmail, otherwise sometimes
+             * when your status is 100 or more.
+             */
             if (g.copChase == 1 || (g.status >= 100 && rand() % 400 < g.status && rand() % 8 == 0))
                 randomEvent(0);
             if (g.dead || !running) break;
+            /* One in five days has an ordinary random event. */
             if (rand() % 5 == 0)
                 randomEvent(rand() % 10);
             if (g.dead || !running) break;
+            /* Loan overdue: the shark's thugs beat you up (25 damage per beating so
+             * far, one more each time).  You get a week to pay, or die.
+             */
             if (g.loanDays < 0 && g.hasLoan == 1) {
                 clearBox(1, 17, 80, 25);
                 printColored("\221\013You're ambushed in a dark alley by Guido's thugs, must be 'bout ten guys!\r\nThe boss-man say \221\027\"Oh, man, you should'na missed de deadline, now me and\r\nboys are gonna have to break your legs! Maybe next time you'll learn, eh?\"\221\013\r\nDey take yous from all directions, you ain't gotta chance...\r\nOne steps out with a \221\026baseball bat \221\013and...\r\n", 1, 17);
@@ -1915,12 +2197,14 @@ void main()
             if (g.dead || !running) break;
             drawStatus();
         }
+        /* Game over: died, or reached the winning status. */
         if (running) {
             if (g.dead) showDeathScreen();
             else showEndGame();
         }
         running = askPlayAgain();
     } while (running);
+    /* Goodbye screen and exit. */
     clrscr();
     puttext(3, 2, 77, 20, farewellScreen);
     printColored("\221\036Thank you for playing DrugLord.", 25, 22);
