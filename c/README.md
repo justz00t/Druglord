@@ -1,14 +1,9 @@
-# DRUGLORD v2.01 – byte-matched C source
+you# DRUGLORD v2.01 – byte-matched C source
 
 This folder contains a C reconstruction of **DRUGLORD.EXE v2.01** (Phil Erwin,
 FantasyWare Inc., 1991-93) that, compiled with **Borland Turbo C 2.01** in the
 **small memory model**, produces an EXE that is **byte-for-byte identical** to the original
 `DRUGLORD.EXE` (74,286 bytes, MD5 `1ea0bd4c15546a1dc44365e80fb4b7cf`).
-
-It is *not* the author's own source (that was never released); it was rebuilt from the EXE
-until the compiler output matched exactly. It contains only the original v2.01 game: nothing
-from the later Go/PowerShell ports (the gun-count fix, extra screens, changed wording) is
-in it. The code is commented so that people can read it and learn how the game works.
 
 ## Files
 
