@@ -171,6 +171,71 @@ enum { EV_COPS, EV_COPS_SELL, EV_CHEAP_DRUGS, EV_BUST, EV_FACTORY,
  * SCORE      see showEndGame().
  */
 
+/* =========================================================================
+ *  KNOWN BUGS IN THE ORIGINAL GAME  (documented here, NOT fixed)
+ * =========================================================================
+ *
+ * This file must stay byte-for-byte identical to the original, so every
+ * bug of the original v2.01 is still in here on purpose.  Each place is marked
+ * in the code with "BUG #n".  Fixed versions belong in a separate copy.
+ *
+ * Definite bugs (clear from the code):
+ *  #1  Price events never vary.  "rand() % rng / 100" is an integer division
+ *      that is always 0, so police sale = x0.7, cheap stuff = x0.6, factory
+ *      fire = x1.2, every time (marketEvent).  Confirmed in the machine code.
+ *  #2  The mugger can't kill you.  His shot takes 2-12 health but "dead" is
+ *      never set, so you can play on with 0 or negative health.
+ *  #3  The rank "OVERLORD" can never be reached: the rank loop stops one entry
+ *      early, so the 1,250,000 limit is never looked at (showEndGame).
+ *  #4  Paying back MORE than you owe takes the whole amount you typed from
+ *      your cash, although the debt is only cleared (loan shark, 'P').
+ *  #5  A new game does not reset goodDeals and totalDeals (nor marketNews and
+ *      loanDays), so after "play again" the deal percentage in the score
+ *      includes the previous game's deals.
+ *  #6  The score screen text (endText) is never reset, so in a second game a
+ *      shorter number or rank title leaves digits/letters of the old, longer
+ *      one on the left of it.
+ *  #7  Buying drugs shows the message "S O L D ! ! !" (copied from selling).
+ *  #8  Buy/sell amounts of 5 digits overflow a 16-bit int: typing 65537 buys
+ *      or sells 1; typing 40000 is silently refused as a negative number.
+ *  #9  A drug eaten by the girlfriend (event 5) leaves its old average cost
+ *      behind, so the next purchase of that drug is averaged with it.
+ *  #10 At the hospital, answering N or ESC still ends the day (the other
+ *      menus don't).  Bills under $15 say "laid up for 0 days".
+ *  #11 The gun smuggler REPLACES your guns instead of adding to them, even
+ *      if yours were better or more numerous (case EV_GUN_DEALER).
+ *      (The Go/PowerShell ports changed this.)
+ *
+ * Possible bugs / overflows (only in extreme cases):
+ *  #12 The final score divides by totalDeals: if you win without ever selling
+ *      out a drug that is a division by zero.  goodDeals * 100 overflows an
+ *      int above 327 good deals.
+ *  #13 The loan grows 5% a day in a long (max 2.1 billion); an unpaid loan
+ *      held for hundreds of days can overflow.  Likewise the trenchcoat price
+ *      calculation overflows for the biggest coats (about 290+ capacity).
+ *  #14 Event 1 checks "marketNews" (another price event this visit) but
+ *      events 2 and 4 don't, so the rule is applied inconsistently.
+ *
+ * Oddities (work as written, but probably not intended):
+ *  - Taking the cops' guns replaces your guns even if yours are better.
+ *  - The truncation (int) in the status calculation means small profits and
+ *    small losses change nothing, and a profit under 1 point is not counted
+ *    as a "good deal".
+ *  - gotoxy() inside a window(): printColored(..., 15, 17) in case EV_BUST and
+ *    the main menu pass screen coordinates while a window is active.  Turbo C
+ *    ignores gotoxy outside the window, so the text starts at the window's
+ *    top-left corner by accident.
+ *  - The intro picks a random colour 0-14 for every pass: 0 is black on
+ *    black (an invisible pass) and white never appears.
+ *  - The gun dealer says "delivered by tomorrow" but you get the guns at once.
+ *  - Prices only change when you travel; staying in a city for days
+ *    (banking, hospital) never changes them.
+ *  - Text typos: "suppliersof" (event 4), "what this'll on de street" (a
+ *    word is missing), "luck luck", "tought", "yous has become".
+ *  - The map has two pairs of cities with identical coordinates (Los Angeles
+ *    / San Diego and New York / Washington): the fare between them is $25.
+ */
+
 /* Prototypes.  Only the functions whose arguments must be pushed in a special
  * way (a char argument, a float argument) need a full prototype; the rest are
  * declared old-style, exactly like the original. */
@@ -944,6 +1009,10 @@ void marketEvent(int count, int rng, float mul)
         else
             sep = ", ";
         picked[drug] = 1;
+        /* BUG #1 (original, not fixed): rand() % rng / 100 is an integer division and
+         * always 0, so the multiplier is exactly "mul".  The intended spread would be
+         * (rand() % rng) / 100.0.
+         */
         price[drug] = price[drug] * ((double)(rand() % rng / 100) + mul);
         if (numDrugs > 2 && i + 2 == numDrugs)
             sep = ", and ";
@@ -1284,6 +1353,9 @@ again:
         if (key == 'Y') {
             printColored(C_YELLOW "You " C_LRED "want" C_YELLOW " 'em, you " C_LRED "got " C_YELLOW "'em!  What a bunch'a " C_BROWN "chumps!", 15, 25);
             sellGuns = 0;
+            /* Oddity: if the cops' guns are a different type, your own guns are replaced,
+             * even if they were better.
+             */
             if (gunType == copGunType) numGuns += numCops;
             else {
                 gunType = copGunType;
@@ -1312,6 +1384,9 @@ skipask:
      * event already happened in this city.
      */
     case EV_COPS_SELL:
+        /* BUG #14 (original, not fixed): only this event checks marketNews; events 2 and 4
+         * can still happen after another price event in the same city.
+         */
         if (marketNews == 1) break;
         printColored(C_LCYAN "\"Hey man, check dis out!  Word has it on de street dat deres des cops, see?\r\nThey musta decided that workin' for 25 G's a year ain't enough, so de've\r\ndecided ta sell some of de take drugs confiscated on de side! De market is\r\nflooded with ", 1, 18);
         setColor(BROWN, BLACK, BOLD);
@@ -1336,6 +1411,9 @@ skipask:
      * The newspaper is a boxed text drawn with line-drawing characters.
      */
     case EV_BUST:
+        /* Oddity: gotoxy() with coordinates outside this window is ignored by Turbo C,
+         * so printColored(..., 15, 17) below really prints at the window's corner.
+         */
         window(15, 17, 80, 25);
         printColored(C_LGRAY "\332\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\277\r\n\263  * * *   " C_BLINK_WHITE "E X T R A ! !   E X T R A ! !" C_LGRAY "   * * *  \263\r\n\263               " C_BLINK_WHITE "Read all about it!!" C_LGRAY "               \263\r\n\303\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\264\r\n\263  After six months of undercover investigation,  \263\r\n\263  police close in and make a major drug bust!    \263\r\n\263  This will no doubt affect street drug prices.  \263\r\n\300\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\304\331", 15, 17);
         window(1, 1, 80, 25);
@@ -1363,6 +1441,9 @@ skipask:
     case EV_BROWNIES:
         if (inventory[DRUG_GRASS] == 0) break;
         printColored(C_BROWN "Ya come back to yer place tonight and find dat yer sexy main squeeze tought\r\ndat it wouldst be a good idea to use some of yer weed to make brownies!!!\r\nAll tings considered, yous take it pretty well.  After all, if ya were mad,\r\nyou would've " C_LGRAY "chopped " C_BROWN "up her body " C_LRED "before " C_BROWN "dumping it in de river!", 1, 17);
+        /* BUG #9 (original, not fixed): avgCost[DRUG_GRASS] is not reset, so the next
+         * purchase of grass is averaged with the old, stale value.
+         */
         inventory[DRUG_GRASS] = 0;
         pressAnyKey();
         break;
@@ -1392,6 +1473,9 @@ skipask:
                 printColored(C_YELLOW "* * *   " C_BLINK_LRED "B L A M   " C_YELLOW "* * *", 28, 23);
                 playSound(SND_MUGGER_SHOT);
                 /* Mugger damage = 2 + random(0..5) + random(0..5)   (2..12). */
+                /* BUG #2 (original, not fixed): health can drop to 0 or below here and "dead"
+                 * is never set; only the cop fight and the loan shark can kill you.
+                 */
                 health -= rand() % 6 + rand() % 6 + 2;
             } else
                 printColored(C_LMAGENTA "He laughs merrily as he takes yer cash and runs off down de street!", 5, 22);
@@ -1424,6 +1508,10 @@ skipask:
         } while (holdSize + 50 < coatSize || coatSize <= holdSize);
         /* Base price of a coat of this size; the real price is 1% to 200% of it. */
         coatPrice = pow((double)coatSize, 3.34) * 0.0634;
+        /* BUG #13 (original, not fixed): (rand() % 200 + 1) * coatPrice is a long
+         * multiplication that overflows 2,147,483,647 when coatPrice is over about
+         * 10.7 million (coat size 290 and up); the price can then become negative.
+         */
         coatPrice = (long)((double)((rand() % 200 + 1) * coatPrice) / 10000.0) * 100;
         printColored(C_LGREEN "You are approached by a shady-lookin guy in a long dark trenchcoat.  He says:", 1, 17);
         printColored(C_LBLUE "\"Hey, bud, I got a " C_BLINK_YELLOW "special " C_LBLUE "trenchcoat for ya, just your style!", 10, 19);
@@ -1493,6 +1581,9 @@ skipask:
                 printColored(C_LGRAY "\"I'm sorry, sir, but I only accept cash " C_WHITE "up-front" C_LGRAY ".  Business is business.\"", 5, 24);
             else {
                 printColored(C_LGRAY "\"Very well, they will be delivered by tomorrow.  Good doing business with you.\"", 1, 24);
+                /* BUG #11 (original, not fixed): the guns you already have are thrown away
+                 * and replaced by the new batch, even when yours are better or more numerous.
+                 */
                 numGuns = gunCount;
                 gunType = gunKind + 1;
                 cash -= gunTotal;
@@ -1711,7 +1802,14 @@ void showEndGame()
     }
     nosound();
     /* Fill the numbers into the score table (right-aligned, column 0x29). */
+    /* BUG #12 (original, not fixed): division by zero when totalDeals is 0, and
+     * goodDeals * 100 overflows a 16-bit int above 327.
+     */
     pct = goodDeals * 100 / totalDeals;
+    /* BUG #6 (original, not fixed): endText[] is a global that is changed in place
+     * and never restored.  In a second game, a number with fewer digits than in
+     * the first leaves the old leading digits on screen (same for the rank).
+     */
     ltoa(cash, numStr, 10);
     len = strlen(numStr);
     stpcpy(endText[6] + (0x29 - len), numStr);
@@ -1754,6 +1852,9 @@ void showEndGame()
     len = strlen(numStr);
     stpcpy(endText[16] + (0x29 - len), numStr);
     /* Find the rank title that goes with the score. */
+    /* BUG #3 (original, not fixed): this should probably be "rank < 11";
+     * as is, rankLimit[10] and the title "OVERLORD" are never used.
+     */
     for (rank = 0; rank < 10; rank++) {
         if (rankLimit[rank] > score) break;
     }
@@ -1821,6 +1922,9 @@ void nextDay()
         }
     }
     /* Daily interest: change these two numbers to change the loan and bank rates. */
+    /* BUG #13 (original, not fixed): debt is a long; it overflows beyond 2.1 billion
+     * (an unpaid loan for roughly 250+ days).
+     */
     debt = debt * 1.05;
     bank = bank * 1.000192;
 }
@@ -1871,6 +1975,8 @@ void showIntro()
     for (; round < 10; round++) {
         prog = 0;
         toggle = !toggle;
+        /* Oddity: colour 0 (black on black) is possible; white (15) never is.
+         */
         setColor(rand() % 15, 0, toggle);
         x = 0;
         y = 0;
@@ -1920,6 +2026,9 @@ void newGame()
         eventDone[i] = 0;
     generatePrices(&price[0], &price[1], &price[2], &price[3], &price[4], &price[5], &price[6], &price[7]);
     city = rand() % NUM_CITIES;
+    /* BUG #5 (original, not fixed): goodDeals, totalDeals (and marketNews, loanDays)
+     * are not reset here, so a second game continues counting the first one.
+     */
     cash = START_CASH;
     holdSize = START_COAT;
     bank = 0L;
@@ -2093,6 +2202,9 @@ void main()
                     gotoxy(27, 22);
                     escPressed = readField(5, 0, inputBuf);
                     if (escPressed == 1) break;
+                    /* BUG #8 (original, not fixed): "amount" is a 16-bit int, atol() gives a long.
+                     * Values of 32768 and over wrap (65537 becomes 1, 40000 becomes negative).
+                     */
                     amount = atol(inputBuf);
                 } while (amount < 0 || inputBuf[0] == 0);
                 setCursor(0);
@@ -2110,6 +2222,9 @@ void main()
                     continue;
                 }
                 if (amount > 0) {
+                    /* BUG #7 (original, not fixed): this is the BUY command, but the message says
+                     * "S O L D".
+                     */
                     printColored(C_YELLOW "* * *   " C_BLINK_WHITE "S O L D ! ! !   " C_YELLOW "* * *", 1, 25);
                     playSound(SND_DEAL);
                     delay(2000);
@@ -2154,6 +2269,8 @@ void main()
                     setColor(YELLOW, BLACK, NORMAL);
                     escPressed = readField(5, 0, inputBuf);
                     if (escPressed == 1) break;
+                    /* BUG #8 (original, not fixed): same overflow as in the buy command.
+                     */
                     amount = atol(inputBuf);
                 } while (amount < 0 || inputBuf[0] == 0);
                 setCursor(0);
@@ -2342,6 +2459,9 @@ void main()
                         delay(1000);
                         continue;
                     }
+                    /* BUG #4 (original, not fixed): when moneyAmount is more than the debt, the
+                     * debt is cleared but the full moneyAmount is still taken from cash below.
+                     */
                     if (moneyAmount >= debt) debt = 0;
                     else debt -= moneyAmount;
                     cash -= moneyAmount;
@@ -2390,6 +2510,9 @@ void main()
                 } while (key != 'Y' && key != 'N' && key != 27);
                 setCursor(0);
                 if (key == 'Y') {
+                    /* BUG #10 (original, not fixed): when the player answers N or ESC the code
+                     * also ends in nextDay() below, so declining costs a day.
+                     */
                     if ((long)hospitalBill > cash) {
                         printColored(C_BLINK_LRED "You don't have enough dinero up front to foot de bill!", 12, 24);
                         playSound(SND_DENIED);
@@ -2398,6 +2521,9 @@ void main()
                         cash -= hospitalBill;
                         printColored(C_YELLOW "OK, yer laid up for ", 5, 24);
                         setColor(LIGHTRED, BLACK, BOLD);
+                        /* BUG #10 (original, not fixed): for a bill under $15 (health 99) this prints
+                         * "0 days" and the loop below runs zero times.
+                         */
                         cprintf("%d", hospitalBill / 15);
                         printColored(C_YELLOW " days recoup'ratin', and yous feel good as new!", 99, 99);
                         playSound(SND_BEEP);

@@ -92,6 +92,15 @@ things look odd.  Each one is also explained where it appears in the code.
 Because of all this: if you change the code, you will most likely no longer get an
 identical EXE.  That is fine for experiments, but compare again if byte-exactness matters.
 
+## This is the unmodified original, including its bugs
+
+`DRUGLORD.C` must always stay byte-matched to the original EXE, so **nothing is ever fixed
+here**.  The bugs of the original game are listed in the comment "KNOWN BUGS IN THE ORIGINAL
+GAME" near the top of `DRUGLORD.C` and marked with `BUG #n` where they happen (for example the
+price events that never vary, the mugger who cannot kill you, and the unreachable OVERLORD rank).
+Any version that changes behaviour (bug fixes, new features) belongs in a separate copy or
+project, not in this folder.
+
 ## Verifying (how the match was checked)
 
 `tools/build.py` copies the three source files into a DOSBox-X folder where Turbo C 2.01 is
