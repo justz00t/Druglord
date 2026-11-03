@@ -73,6 +73,14 @@ things look odd.  Each one is also explained where it appears in the code.
 * **Strings and tables in the original order.** Turbo C stores string literals in the order
   they first appear, without merging duplicates, so the order of the text and the odd
   unused `"";` in `marketEvent` are significant.
+* **Readability aids that do not change the bytes.** Colour codes in strings
+  (`C_LRED "text"`), constants (`NUM_DRUGS`, `WIN_STATUS`, the `EV_` event numbers, the
+  `SND_` sound numbers) and the plain names for the game state (`cash`, `health`, ...,
+  which are `#define`s for `g.cash`, `g.health`, ...) are all resolved by the preprocessor,
+  and a few `#define`/`#undef` pairs inside `randomEvent()` and `main()` give shared scratch
+  variables a meaningful name in each case.  The big comment "GAME RULES AND FORMULAS" near the
+  top lists every formula in the game (prices, fares, interest, loans, fights, score) and says
+  where to change it.
 * **Odd constructs** such as `generatePrices()` taking eight `long *` pointers, `padByte`, the
   unused main-screen copy in `SCREENS.C`, or `bonus` being reused as the hospital bill are
   there because the original does it that way.

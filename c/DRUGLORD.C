@@ -100,6 +100,77 @@ enum { EV_COPS, EV_COPS_SELL, EV_CHEAP_DRUGS, EV_BUST, EV_FACTORY,
 #define SND_MUGGER_SHOT  13  /* the mugger's gun */
 #define SND_SCROLL       20  /* click when scrolling the final score list */
 
+/* =========================================================================
+ *  GAME RULES AND FORMULAS -- read this if you want to change the balance
+ * =========================================================================
+ *
+ * Every number the game uses is in this file; this is the list of where.
+ *
+ * START      $500, a coat for 10 items, 100 health, 1 status point, random
+ *            city and date.  (START_CASH, START_COAT, newGame())
+ * GOAL       Reach 300 status points (WIN_STATUS).  Then you get a score.
+ * ONE TURN   Everything you do (buy, sell, fly, bank, loan, hospital) ends
+ *            the day.  Then, in this order, the game may trigger events:
+ *              - trenchcoat OR gun dealer offer: 1 day in 10, and only if
+ *                rand % (status/20 + 1) > 4, which needs status of 100 or more
+ *                (and gets more likely the higher your status)
+ *              - cops attack if copChase is set, or if status >= 100 and
+ *                (rand % 400 < status) and a 1 in 8 chance
+ *              - 20%: one of the 10 random events (0-9)
+ *              - loan overdue: the thugs come
+ *
+ * PRICES     price = (random(lo .. hi-1) + 1) * cityMultiplier   (see
+ *            generatePrices).  Range per drug (priceRange[]):
+ *                Cocaine 40000-50000  Crack 25000-30000  Heroin 10000-15000
+ *                Acid 2000-3000       Crystal 600-1000   Grass 200-400
+ *                Speed 70-100         Ludes 10-20
+ *            New prices are rolled every time you travel to a city.
+ *            Price events: police sale x0.7, cheap stuff x0.6, factory fire
+ *            x1.2 (only one drug), drug bust x1.05..1.29 (all drugs).
+ * AIR FARE   distance * 60 + 25  (travelCost)
+ * COAT       holds holdSize items in total, all drugs together.
+ *            New coats: capacity ^ 3.34 * 0.0634 * (1..200)/100.
+ * STATUS     +  selling out a whole stack of a drug:
+ *                  status += (sale price / average cost - 1) * 3 * factor
+ *               factor = 9 cocaine, 6 crack, 3 heroin, 1 the others.
+ *               (The "average cost" is kept per drug: first buy = price,
+ *               later buys = (new price + old average) / 2.)
+ *               A loss makes status go DOWN.
+ *            +  selling the guns of the cops you shot: + number of cops
+ *            -  calling a friend (-1) or a posse (-5), a helper dying (-1),
+ *               scaring off the mugger (-10)
+ * BANK       interest 0.0192% a day (x1.000192).  No fee or limit.
+ * LOAN       Needs status > 0.  Minimum $1000.  You can owe at most
+ *            about status * $10,000 in total.  The debt grows 5% a day.
+ *            Term = int( ln(status*10000 / total debt) / ln(1.2) ) + 4 days
+ *            (the loan shark's screen shows one day less; see case 'B' in main).
+ *            The bigger your debt compared with your status, the shorter.
+ *            If the deadline passes: the thugs beat you (25 health each,
+ *            once more every time) and you get 7 more days.  The shark will
+ *            not lend to you again until you have paid in full.
+ * HOSPITAL   cost = (100 - health) * 10 dollars; the stay lasts cost / 15
+ *            days (interest keeps running!); health is then 100.
+ * FIGHT      Your side: you plus helpers.  Cops: 3-10 of them, with gun type
+ *            status / (2 * number of cops), which has to come out as 2 or 3
+ *            (otherwise it is re-rolled); 1 time in 20 a special squad of
+ *            1-4 or 8-10 cops comes (see case EV_COPS in randomEvent).
+ *            Every shot hits 50% of the time.
+ *            Damage: gun = gunPower[gunType] dice of 6 sides; fists = 1 die of 4.
+ *            Uzi and AK-47 (gun types 4 and 5) shoot up to 3 times per turn.
+ *            Cop hit points: 2 dice of 15 sides + 15.  Helper hit points:
+ *            25 + random(0-9) + (status/50) dice of 10 sides.
+ *            Running away works if random(0-9) + cops/3 is less than
+ *            random(0-9) + helpers/3; if it fails the cops get a free round.
+ *            Afterwards you may take the cops' guns, or sell them: that pays
+ *            cops * cop gun type * $200 and gives + (number of cops) status.
+ * MUGGER     takes all your cash; if you have under $50 he shoots you
+ *            instead (2-12 damage).  With status >= 10 you can scare him off
+ *            for 10 status points (not always possible: 1 in 20 he doesn't ask).
+ * GUN DEALER guns cost $200 x gun type each, usually 2-6 per shipment.
+ * BLACKMAIL  only with $10,000 or more cash.  Demands 70-99% of your cash.
+ * SCORE      see showEndGame().
+ */
+
 /* Prototypes.  Only the functions whose arguments must be pushed in a special
  * way (a char argument, a float argument) need a full prototype; the rest are
  * declared old-style, exactly like the original. */
@@ -718,8 +789,13 @@ void drawMainScreen()
     printColored("v2.01", 74, 2);
 }
 
-/* Price of a plane ticket between cities a and b: straight-line distance on
- * the map (cityCoords) times 60, plus 25 dollars. */
+/* Price of a plane ticket between cities a and b:
+ *
+ *   cost = distance * 60 + 25      (distance = straight line on the map grid)
+ *
+ * Examples: Chicago-Detroit $85, Chicago-Miami $194, Los Angeles-Miami $330.
+ * Cities with equal coordinates (Los Angeles/San Diego, New York/Washington)
+ * cost only $25 between each other.  Change 60.0 / 25.0 to change fares. */
 int travelCost(a, b)
 int a, b;
 {
@@ -755,8 +831,15 @@ void drawCityMenu()
     }
 }
 
-/* Roll new street prices for all eight drugs.  Each price is a random value in
- * the drug's range, plus priceBias, times the current city's multiplier.
+/* Roll new street prices for all eight drugs.
+ *
+ *   price = ( random(lo .. hi-1) + priceBias ) * cityPriceMult[city][drug]
+ *
+ * lo/hi come from priceRange[], priceBias is always 1.0 and the multiplier
+ * from cityPriceMult[] is 0.90 .. 1.10.  Example: cocaine (40000-50000) in
+ * Chicago (x0.95) costs between about $38,000 and $47,500.
+ * To change prices, edit the two tables, or the formula below.
+ *
  * (The original passes the eight price slots as eight pointers -- an odd
  * choice, but it has to stay for the bytes to match.) */
 void generatePrices(long *p0, long *p1, long *p2, long *p3, long *p4, long *p5, long *p6, long *p7)
@@ -829,9 +912,17 @@ int hp, row, side;
     cprintf("%4d            %-12s", hp, word);
 }
 
-/* A "street news" price event: pick 1..count different drugs, announce them
- * ("X, Y, and Z") and multiply their price by (random 0..rng/100) + mul.
- * Used for both price spikes (mul large) and busts (mul small). */
+/* A "street news" price event: pick 1..count different drugs (at random),
+ * announce them ("X, Y, and Z") and change their price:
+ *
+ *   price = price * ( (rand() % rng / 100) + mul )
+ *
+ * Used for both price crashes (mul < 1) and spikes (mul > 1).
+ * NOTE (a bug in the original game): "rand() % rng / 100" is an INTEGER
+ * division and rng is at most 40, so that part is always 0.  The multiplier
+ * is therefore exactly "mul" (0.7, 0.6 or 1.2) and "rng" has no effect.  To get
+ * the random spread that was clearly intended, write (rand() % rng) / 100.0
+ * -- but that no longer matches the original EXE byte for byte. */
 void marketEvent(int count, int rng, float mul)
 {
     int numDrugs;
@@ -894,9 +985,9 @@ void pressAnyKey()
  *   4  a factory burns down         (one up)       9  blackmail letter
  * Each event can happen only once per city visit (eventDone[kind]).
  *
- * The first case is by far the longest: it is the cop fight.  The unusual
- * local names (v20, v1e, ...) are the original compiler's stack slots reused
- * by several cases; their meaning is explained in each case. */
+ * The first case is by far the longest: it is the cop fight.  A few
+ * scratch variables (v20, v1e, v1c, v1a, bm) are shared by several cases;
+ * at the start of each case a #define gives them the name that fits it. */
 void randomEvent(kind)
 int kind;
 {
@@ -929,9 +1020,10 @@ int kind;
     if (eventDone[kind] == 1) return;
     clearBox(1, 17, 80, 25);
     switch (kind) {
+#undef sellGuns
     /* ---- Event 0: the cops fight --------------------------------
-     * Fighters on your side: hp[0] is you, hp[1..nfr] are friends/posse.
-     * Cops: chp[0..di-1] (di = number of cops, ctype = their gun type).
+     * Fighters on your side: myHp[0] is you, myHp[1..numHelpers] are friends/posse.
+     * Cops: copHp[0..numCops-1] (numCops = number of cops, copGunType = their gun type).
      * state: 0 = normal, 1 = escaped, 2 = tried to run and failed (cops shoot first).
      */
     case EV_COPS:
@@ -966,7 +1058,7 @@ int kind;
             } else
                 break;
         }
-        /* nfr = number of helpers who fight next to you. */
+        /* numHelpers = number of helpers who fight next to you. */
         switch (choice) {
         case 1:
             numHelpers = 0;
@@ -976,6 +1068,7 @@ int kind;
             status--;
             break;
         case 3:
+            /* Posse size: 4..7, plus 1 for every 100 status points; at most 8. */
             numHelpers = rand() % 4 + status / 100 + 4;
             if (numHelpers > 8) numHelpers = 8;
             status -= 5;
@@ -1009,12 +1102,13 @@ int kind;
         myHp[0] = health;
         setColor(BROWN, BLACK, NORMAL);
         for (i = 1; i <= numHelpers; i++) {
+            /* Helper hit points = 25 + random(0..9) + (status / 50) dice of 10 sides. */
             myHp[i] = rand() % 10 + rollDice(10, status / 50) + 25;
             gotoxy(1, i + 10);
             if (choice == 2) cprintf("%10s:", "Friend");
             if (choice == 3) cprintf("%6s #%2d:", "Posse", i);
         }
-/* Choose the cops: how many (di) and how strong (ctype is the gun type,
+/* Choose the cops: how many (numCops) and how strong (copGunType is the gun type,
  * limited to 2 or 3, tougher with more status).  Re-roll until valid.
  * Once in 20 times a bigger squad appears.
  */
@@ -1042,6 +1136,7 @@ again:
         for (i = 0; i < numCops; i++) {
             gotoxy(42, i + 11);
             cprintf("%6s #%2d", "Cop", i + 1);
+            /* Cop hit points = two dice of 15 sides + 15 (17..45). */
             copHp[i] = rollDice(15, 2) + 15;
         }
         /* Cop hit points: two 15-sided dice + 15 each. */
@@ -1083,6 +1178,9 @@ again:
                                     printColored(C_BLINK_RED "*  Hit!  *", 67, copTarget + 11);
                                     playSound(SND_HIT);
                                     delay(100);
+                                    /* Damage: a gun does gunPower[gunType] dice of 6 sides (e.g. Uzi: 4d6);
+                                     * fists do one die of 4 sides.  Only the first numGuns fighters have a gun.
+                                     */
                                     if (i < numGuns) copHp[copTarget] -= rollDice(6, gunPower[gunType]);
                                     else copHp[copTarget] -= rollDice(4, 1);
                                     if (copHp[copTarget] <= 0) {
@@ -1137,6 +1235,7 @@ again:
                 case 'R':
                     printColored(C_LCYAN "You take off running... ", 20, 25);
                     delay(3000);
+                    /* Escape if  random(0..9) + cops/3  <  random(0..9) + helpers/3. */
                     if (rand() % 10 + numCops / 3 < rand() % 10 + numHelpers / 3) {
                         printColored(C_BLINK_YELLOW "and ya got away!!!", 99, 99);
                         health = myHp[0];
@@ -1167,7 +1266,7 @@ again:
         clearBox(1, 23, 80, 25);
         printColored(C_LGREEN "Yous wasted 'em!!! Way ta go, man!!!", 23, 23);
         delay(1000);
-        /* v20 = 1 means "sell the guns" (default); 0 if you took them instead. */
+        /* sellGuns = 1 means "sell the guns" (default); 0 if you took them instead. */
         sellGuns = 1;
         /* If you already own better and enough guns, don't even ask. */
         if (copGunType < gunType && numCops <= numGuns) goto skipask;
@@ -1198,6 +1297,7 @@ skipask:
          */
         if (sellGuns == 1) {
             printColored(C_LCYAN "You sell the ", 5, 24);
+            /* Selling price: $200 per gun per level of cop gun type. */
             gunSaleMoney = numCops * copGunType * 200;
             cprintf("%d guns that were on the pigs you wasted for %d bucks!", numCops, gunSaleMoney);
             printColored(C_LCYAN "This'll teach 'em not to mess with ya, huh?", 20, 25);
@@ -1207,10 +1307,10 @@ skipask:
         }
         if (dead == 0) drawMainScreen();
         break;
-    /* ---- Event 1: police sell confiscated drugs.  1-3 drugs drop to
-     * 70..99% of their price.  Skipped if a price event already ran.
+    /* ---- Event 1: police sell confiscated drugs.  1-3 random drugs fall
+     * to 70% of their price (marketEvent(3, 30, 0.7)).  Skipped if a price
+     * event already happened in this city.
      */
-#undef sellGuns
     case EV_COPS_SELL:
         if (marketNews == 1) break;
         printColored(C_LCYAN "\"Hey man, check dis out!  Word has it on de street dat deres des cops, see?\r\nThey musta decided that workin' for 25 G's a year ain't enough, so de've\r\ndecided ta sell some of de take drugs confiscated on de side! De market is\r\nflooded with ", 1, 18);
@@ -1221,7 +1321,9 @@ skipask:
         playSound(SND_NEWS);
         pressAnyKey();
         break;
-    /* ---- Event 2: cheap homemade stuff.  1-3 drugs drop to 60..89%. */
+#undef coatSize
+#undef coatPrice
+    /* ---- Event 2: cheap homemade stuff.  1-3 random drugs fall to 60% (marketEvent(3, 40, 0.6)). */
     case EV_CHEAP_DRUGS:
         printColored(C_LGRAY "\"Hey, I heard it through de grapevine dat deres some cheap homemade stuff\r\navailable from some of the homeboys downtown.  Real primo stuff, dey say!\r\nAll I hear on de streets is 'Cheap ", 1, 18);
         setColor(BROWN, BLACK, BOLD);
@@ -1242,8 +1344,8 @@ skipask:
         playSound(SND_EXTRA);
         pressAnyKey();
         break;
-    /* ---- Event 4: a supplier's factory is destroyed.  One drug costs
-     * 120..159% of the normal price.
+    /* ---- Event 4: a supplier's factory is destroyed.  One random drug
+     * rises to 120% of its price (marketEvent(1, 40, 1.2)).
      */
     case EV_FACTORY:
         printColored(C_LMAGENTA "\"Dude, I got some news for ya... a factory of one of de cities biggest suppliersof ", 1, 18);
@@ -1289,6 +1391,7 @@ skipask:
                 printColored("He looks at ya like a crazed animal, and pulls de trigger!", 10, 22);
                 printColored(C_YELLOW "* * *   " C_BLINK_LRED "B L A M   " C_YELLOW "* * *", 28, 23);
                 playSound(SND_MUGGER_SHOT);
+                /* Mugger damage = 2 + random(0..5) + random(0..5)   (2..12). */
                 health -= rand() % 6 + rand() % 6 + 2;
             } else
                 printColored(C_LMAGENTA "He laughs merrily as he takes yer cash and runs off down de street!", 5, 22);
@@ -1298,8 +1401,13 @@ skipask:
         pressAnyKey();
         break;
     /* ---- Event 7: trenchcoat salesman.  Offers a bigger coat (capacity in
-     * v20, a multiple of 10, up to 50 more than yours).  The price bm grows
-     * with the capacity: capacity^3.34 * 0.0634, times a random 1-200%.
+     * coatSize, a multiple of 10, up to 50 more than yours).  The price (coatPrice) is
+     *     base  = capacity ^ 3.34 * 0.0634             (20 -> $1,404;  100 -> $303,451)
+     *     price = base * random(1..200) / 100, rounded down to whole hundreds
+     * so it can be anywhere from 1% to 200% of "base".  Only offered if your
+     * coat is smaller than 300.  The capacity is 10 * (1..10), with a 1 in 5
+     * chance of adding another 1..10 (and again 1 in 5), and must be bigger
+     * than your coat but at most 50 bigger.
      */
     case EV_TRENCHCOAT:
 #define coatSize       v20
@@ -1314,6 +1422,7 @@ skipask:
             }
             coatSize *= 10;
         } while (holdSize + 50 < coatSize || coatSize <= holdSize);
+        /* Base price of a coat of this size; the real price is 1% to 200% of it. */
         coatPrice = pow((double)coatSize, 3.34) * 0.0634;
         coatPrice = (long)((double)((rand() % 200 + 1) * coatPrice) / 10000.0) * 100;
         printColored(C_LGREEN "You are approached by a shady-lookin guy in a long dark trenchcoat.  He says:", 1, 17);
@@ -1343,12 +1452,10 @@ skipask:
             printColored(C_LBLUE "\"OK, it's your loss, man.  What a shame!\"", 20, 24);
         pressAnyKey();
         break;
-    /* ---- Event 8: gun smuggler Juan.  v20 = gun type offered (0-4),
-     * v1e = how many, v1c = price each, v1a = total.  Buying replaces
+    /* ---- Event 8: gun smuggler Juan.  gunKind = gun type offered (0-4),
+     * gunCount = how many, gunPrice = price each, gunTotal = total.  Buying replaces
      * your present guns with the new batch.
      */
-#undef coatSize
-#undef coatPrice
     case EV_GUN_DEALER:
 #define gunKind        v20
 #define gunCount       v1e
@@ -1394,17 +1501,18 @@ skipask:
             printColored(C_LGRAY "\"As you wish.  Perhaps next time we may do business.\"", 15, 24);
         pressAnyKey();
         break;
-    /* ---- Event 9: blackmail.  Only if you have $10000+.  Demands 70..99% of
-     * your cash (rounded to thousands).  If you refuse, 80% of the time
-     * the cops will come after you (event 0 is re-armed).
-     */
 #undef gunKind
 #undef gunCount
 #undef gunPrice
 #undef gunTotal
+    /* ---- Event 9: blackmail.  Only if you have $10000+.  Demands
+     *     amount = cash * random(0.70 .. 0.99), rounded down to thousands.  If you refuse, 80% of the time
+     * the cops will come after you (event 0 is re-armed).
+     */
     case EV_BLACKMAIL:
 #define blackmail      bm
         if (cash < 10000L) break;
+        /* Demand = 70% .. 99% of your cash, rounded down to a multiple of 1000. */
         blackmailFactor = rand() % 30 / 100.0 + 0.7;
         blackmail = cash * blackmailFactor / 1000.0;
         blackmail = blackmail * 1000;
@@ -1511,12 +1619,25 @@ void showDeathScreen()
  * endText[], computes your score and rank and lets you scroll through it
  * with the arrow keys until you press ESC.
  *
- * Score = (e^(net worth * 6.9315e-8) * 75000, capped at 700000)
- *       + (days-based bonus 104e9 / days^2.12, capped at 500000)
- *       + (percent of good deals)^8.14 * 2.48e-11
- *       + 1500 per gun (gun type * number of guns)
- * and the rank is the number of thresholds in thr[] that it reaches.
- * (6.9315e-8 is ln(2)/10,000,000: net worth doubles the base every 10 million.) */
+ * HOW THE SCORE IS CALCULATED
+ *   net worth = cash + bank - debt
+ *   A = 75000 * floor(2 ^ (net worth / 10,000,000))        capped at 700,000
+ *       ($0 -> 75k, $10M -> 150k, $20M -> 300k, $30M -> 600k, $40M+ -> 700k)
+ *       (in the code: exp(networth * 6.9315e-8), 6.9315e-8 = ln(2) / 10,000,000)
+ *   B = 104,000,000,000 / days ^ 2.12                      capped at 500,000
+ *       (the fewer days you needed, the more: 100 days or less is the full
+ *        500k, 200 days = 500k, 300 days = 500k, 400 days = 317k)
+ *   C = (percentage of profitable sales) ^ 8.14 * 2.48e-11
+ *       (50% -> 1,675;  80% -> 76,842;  100% -> 472,554)
+ *   D = gun type * number of guns * 1500
+ *   score = A + B + C + D
+ *
+ * RANK: the first title whose limit is above your score (see rankLimit[]):
+ *   below 250k Loser!, 500k Dopehead, 600k Peddler, 700k Pusher, 800k Gangster,
+ *   850k Dealer, 900k Trafficker, 950k Racketeer, 1.0M Marketeer,
+ *   1.1M Entrepreneur, and 1.1M or more is DRUGLORD.  (The title "OVERLORD"
+ *   and the 1,250,000 limit exist in the tables but can never be reached.)
+ */
 void showEndGame()
 {
     int i, j, k, x, row, numLayers, stepDelay, layer, pct, rank;
@@ -1621,6 +1742,7 @@ void showEndGame()
     stpcpy(endText[13] + (0x29 - len), numStr);
     /* Now the score (see the formula above). */
     wealthFactor = exp((double)(cash + bank - debt) * 6.9315e-08);
+    /* Score part A (see the formula at the top of this function). */
     score = (long)wealthFactor * 75000L;
     if (score > 700000L) score = 700000L;
     speedBonus = (long)(pow((double)totalDays, -2.12) * 104000000000.0);
@@ -1676,8 +1798,13 @@ void showEndGame()
     }
 }
 
-/* Advance the calendar one day.  The loan grows 5% a day and the bank
- * account earns 0.0192% a day.  Years are two digits (wrap at 100). */
+/* Advance the calendar one day, and apply the daily interest:
+ *
+ *   debt = debt * 1.05          loan shark: 5% per day (compound)
+ *   bank = bank * 1.000192      bank: 0.0192% per day (about 7% a year)
+ *
+ * and loanDays (days left to repay) goes down by one.  Years are two digits
+ * and wrap from 99 to 00.  Change 1.05 / 1.000192 to change the interest. */
 void nextDay()
 {
     loanDays--;
@@ -1693,6 +1820,7 @@ void nextDay()
                 year = 0;
         }
     }
+    /* Daily interest: change these two numbers to change the loan and bank rates. */
     debt = debt * 1.05;
     bank = bank * 1.000192;
 }
@@ -1987,6 +2115,9 @@ void main()
                     delay(2000);
                     inventory[drug] += amount;
                     cash -= (long)amount * price[drug];
+                    /* Keep a running "average cost": the first purchase sets it; later ones
+                     * average it with today's price (a simple mean, not weighted by amount).
+                     */
                     if (avgCost[drug] == 0)
                         avgCost[drug] = price[drug];
                     else
@@ -1996,7 +2127,7 @@ void main()
             /* ---- Sell drugs.  If you sell the whole stack the status changes by the
              * profit ratio ((price/avgCost - 1) * 3 * bonus).  "bonus" is the
              * factor 9, 6 or 3 for the three most expensive drugs (cocaine,
-crack, heroin) and 1 for the rest.
+             * crack, heroin) and 1 for the rest.
              */
             case 'S':
 #define profitBonus    bonus
@@ -2040,6 +2171,10 @@ crack, heroin) and 1 for the rest.
                     if (inventory[drug] - amount == 0) {
                         if (drug < 3) profitBonus = (3 - drug) * 3;
                         else profitBonus = 1;
+                        /* Selling the last of a drug changes status by
+                         * (sale price / average cost - 1) * 3 * profitBonus.  Selling below your cost
+                         * makes the number negative: status drops.
+                         */
                         statusBefore = status;
                         status += (int)(((double)price[drug] / (double)(unsigned long)avgCost[drug] - 1.0) * 3.0 * profitBonus);
                         totalDeals++;
@@ -2157,6 +2292,9 @@ crack, heroin) and 1 for the rest.
                         delay(1000);
                         continue;
                     }
+                    /* Loan term in days = ln(status * 10000 / (old debt + new loan)) / ln(1.2) + 4.
+                     * (0.1823... is ln(1.2).)  A bigger debt gives a shorter term.
+                     */
                     loanTerm = (int)((log((double)status * 10000.0) - log((double)(debt + moneyAmount))) / 0.182321556794) + 4;
                     if ((moneyAmount + debt) / 10000 > status || (loanTerm >= loanDays && hasLoan == 1)) {
                         printColored(C_LCYAN "\"Look, you already owe me ", 1, 24);
@@ -2239,6 +2377,7 @@ crack, heroin) and 1 for the rest.
                     pressAnyKey();
                     continue;
                 }
+                /* The bill is $10 per missing hit point. */
                 hospitalBill = (MAX_HEALTH - health) * 10;
                 printColored(C_WHITE "You drag yer sorry butt into de loc'l Hospital.  The docs check ye\r\n   out, and come to the conclusion that it'll cost ", 4, 19);
                 setColor(LIGHTGREEN, BLACK, BOLD);
