@@ -1,4 +1,4 @@
-you# DRUGLORD v2.01 – byte-matched C source
+# DRUGLORD v2.01 – byte-matched C source
 
 This folder contains a C reconstruction of **DRUGLORD.EXE v2.01** (Phil Erwin,
 FantasyWare Inc., 1991-93) that, compiled with **Borland Turbo C 2.01** in the
