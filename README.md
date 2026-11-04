@@ -9,3 +9,10 @@ Everything is in [`c/`](c/): the source, the build and verification scripts, and
 
 The source also carries a written-out description of the game's rules and formulas ("GAME RULES AND FORMULAS" in
 `c/DRUGLORD.C`) and a list of the original's bugs, documented but deliberately not fixed so the match stays exact.
+
+## Other versions
+
+This repository is only the byte-matched C source. The ports live in their own repositories:
+
+- **[druglord-ports](https://github.com/justz00t/druglord-ports)**: Windows exe (v2.10), browser version (WebAssembly) and PowerShell edition.
+- **[druglord-nes](https://github.com/justz00t/druglord-nes)**: a separate NES port (ROM and source).
