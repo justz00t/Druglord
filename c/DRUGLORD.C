@@ -204,7 +204,6 @@ enum { EV_COPS, EV_COPS_SELL, EV_CHEAP_DRUGS, EV_BUST, EV_FACTORY,
  *      menus don't).  Bills under $15 say "laid up for 0 days".
  *  #11 The gun smuggler REPLACES your guns instead of adding to them, even
  *      if yours were better or more numerous (case EV_GUN_DEALER).
- *      (The Go/PowerShell ports changed this.)
  *
  * Possible bugs / overflows (only in extreme cases):
  *  #12 The final score divides by totalDeals: if you win without ever selling
