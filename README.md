@@ -4,6 +4,8 @@ A commented C reconstruction of **DRUGLORD.EXE v2.01** by Phil Erwin (FantasyWar
 Compiled with **Borland Turbo C 2.01** in the small memory model, it produces an EXE that is
 **byte-for-byte identical** to the original (74,286 bytes, MD5 `1ea0bd4c15546a1dc44365e80fb4b7cf`).
 
+![DRUGLORD v2.01 title screen](docs/title-screen.png)
+
 Everything is in [`c/`](c/): the source, the build and verification scripts, and
 [`c/README.md`](c/README.md) with the compiler details and how to compile and verify it yourself.
 
